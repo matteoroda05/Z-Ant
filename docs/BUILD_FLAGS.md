@@ -10,6 +10,7 @@ The Z-Ant build system is highly configurable. You can pass these flags to the `
 | `-Doptimize` | enum | `Debug` | Optimization level (`Debug`, `ReleaseSafe`, `ReleaseFast`, `ReleaseSmall`) | All |
 | `-Dtrace_allocator` | bool | `true` | Use a tracing allocator for memory debugging | All |
 | `-Dallocator` | string | `"raw_c_allocator"` | Underlying allocator to use | All |
+| `-Denable_CMSIS` | bool | `false` | Enable the CMSIS-NN integration switch. Zig code reads the exported internal option as `build_options.enable_cmsis`. | Build modules |
 | **Codegen & Model Options** | | | | |
 | `-Dmodel` | string | `"mnist-8"` | Name of the model to process | `lib-gen`, `lib-exe`, `lib`, `lib-test` |
 | `-Dmodel_path` | string | `datasets/...` | Path to the ONNX model file. Defaults to `datasets/models/{model}/{model}.onnx` | `lib-gen`, `lib-exe` |
@@ -33,6 +34,16 @@ The Z-Ant build system is highly configurable. You can pass these flags to the `
 | `-Dop` | string | `"all"` | Limit testing to a specific operator name | `test` |
 | `-Dtest_name` | string | `""` | Specify a specific test case name to run | `test` |
 | `-Dfull` | bool | `false` | Run the full benchmark suite | `benchmark` |
+### CMSIS-NN Integration Switch
+
+Enable the CMSIS-NN integration switch with:
+
+```sh
+zig build -Denable_CMSIS=true
+```
+
+This exports `build_options.enable_cmsis` to Zig modules. The switch is intended for future ARM Cortex-M CMSIS-NN usage, but it does not yet add CMSIS C sources, include paths, wrappers, or QLinearConv dispatch.
+
 ### Common Commands
 
 * **Generate Library:** `zig build lib-gen -Dmodel=my_model`

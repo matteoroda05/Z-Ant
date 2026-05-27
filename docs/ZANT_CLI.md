@@ -154,6 +154,7 @@ These flags can be used with any build command:
 | `-Doptimize` | enum | `Debug` | Optimization mode: Debug, ReleaseFast, ReleaseSafe, ReleaseSmall |
 | `-Dtrace_allocator` | bool | `true` | Enable tracing allocator |
 | `-Dallocator` | string | `"raw_c_allocator"` | Allocator type to use |
+| `-Denable_CMSIS` | bool | `false` | Enable the CMSIS-NN integration switch exported internally as `build_options.enable_cmsis` |
 
 ### Global Usage Examples
 ```bash
@@ -166,6 +167,9 @@ zig build lib -Dmodel="my_model" -Doptimize=ReleaseFast
 # Build for different platforms
 zig build lib -Dtarget=x86_64-windows -Doptimize=ReleaseSmall
 zig build lib -Dtarget=aarch64-macos -Doptimize=ReleaseSafe
+
+# Enable the CMSIS-NN integration switch
+zig build lib -Denable_CMSIS=true
 ```
 
 ## Common Workflows

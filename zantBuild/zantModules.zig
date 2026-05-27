@@ -13,11 +13,12 @@ pub const ZantModules = struct {
         const zant_utils_mod = b.createModule(.{ .root_source_file = b.path("src/utils/utils.zig") });
         zant_utils_mod.addOptions("build_options", zantStepOptions.build_step_option);
 
-        // --- IR_zant module (depends on: zant_utils) ---
+        // --- IR_zant module (depends on: zant_utils, build_options) ---
         // onnx is imported via relative path from IR_zant/onnx.zig
         const IR_zant_mod = b.createModule(.{ .root_source_file = b.path("src/codegen/IR_zant.zig") });
         IR_zant_mod.addImport("zant_utils", zant_utils_mod);
         IR_zant_mod.addImport("IR_zant", IR_zant_mod); // self-import for internal files
+        IR_zant_mod.addOptions("build_options", zantStepOptions.build_step_option);
 
         // --- codegen module (depends on: IR_zant, codegen_options, build_options) ---
         // NOTE: codegen does not depend on zant_utils directly; its internal files

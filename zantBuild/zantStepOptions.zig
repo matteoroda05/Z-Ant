@@ -26,6 +26,7 @@ pub const ZantStepOptions = struct {
         build_options.addOption([]const u8, "allocator", (b.option([]const u8, "allocator", "Allocator to use") orelse "raw_c_allocator"));
 
         build_options.addOption(bool, "use_tensor_pool", zantOptions.codegen_flags.use_tensor_pool); //codegen
+        build_options.addOption(bool, "enable_cmsis", zantOptions.cmsis_flags.enable_cmsis); //cmsis
 
         return build_options;
     }
