@@ -18,6 +18,11 @@ const NodeZant = NodeZant_lib.NodeZant;
 
 const tensorMath = IR_zant.core.math_standard;
 const utils = IR_zant.utils;
+const cmsis = IR_zant.cmsis;
+
+comptime {
+    _ = cmsis.cmsisUsed();
+}
 
 // https://onnx.ai/onnx/operators/onnx__QLinearConv.html
 // INPUTS:
