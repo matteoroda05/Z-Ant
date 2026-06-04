@@ -6,11 +6,12 @@ The Z-Ant build system is highly configurable. You can pass these flags to the `
 |------|------|---------|-------------|----------------|
 | **General Build Options** | | | | |
 | `-Dtarget` | string | `"native"` | Target architecture (e.g., `thumb-freestanding`, `x86_64-linux`) | All |
-| `-Dcpu` | string | `null` | CPU model (e.g., `cortex_m33`, `cortex_m7`) | All |
+| `-Dcpu` | string | `null` | CPU model (e.g., `cortex_m33`, `cortex-m7`). CMSIS auto-detection treats values starting with `cortex_m`, `cortex-m`, or `cortexm` as Cortex-M, case-insensitively. | All |
 | `-Doptimize` | enum | `Debug` | Optimization level (`Debug`, `ReleaseSafe`, `ReleaseFast`, `ReleaseSmall`) | All |
 | `-Dtrace_allocator` | bool | `true` | Use a tracing allocator for memory debugging | All |
 | `-Dallocator` | string | `"raw_c_allocator"` | Underlying allocator to use | All |
-| `-Denable_CMSIS` | bool | `false` | Enable the CMSIS-NN integration switch. Zig code reads the exported internal option as `build_options.enable_cmsis`. | Build modules |
+| `-Denable_CMSIS` | bool | `false` | Request CMSIS-NN usage. The CMSIS gate uses this only when `-Dcpu` is detected as Cortex-M. | Build modules |
+| `-Dforce_CMSIS` | bool | `false` | Force CMSIS-NN usage even when `-Denable_CMSIS` is not set or `-Dcpu` is not detected as Cortex-M. The user is responsible for any later CMSIS build failure. | Build modules |
 | **Codegen & Model Options** | | | | |
 | `-Dmodel` | string | `"mnist-8"` | Name of the model to process | `lib-gen`, `lib-exe`, `lib`, `lib-test` |
 | `-Dmodel_path` | string | `datasets/...` | Path to the ONNX model file. Defaults to `datasets/models/{model}/{model}.onnx` | `lib-gen`, `lib-exe` |
@@ -36,13 +37,21 @@ The Z-Ant build system is highly configurable. You can pass these flags to the `
 | `-Dfull` | bool | `false` | Run the full benchmark suite | `benchmark` |
 ### CMSIS-NN Integration Switch
 
-Enable the CMSIS-NN integration switch with:
+Request CMSIS-NN usage with:
 
 ```sh
-zig build -Denable_CMSIS=true
+zig build -Denable_CMSIS=true -Dcpu=cortex_m7
 ```
 
-This exports `build_options.enable_cmsis` to Zig modules. The switch is intended for future ARM Cortex-M CMSIS-NN usage, but it does not yet add CMSIS C sources, include paths, wrappers, or QLinearConv dispatch.
+This exports `build_options.enable_cmsis` and `build_options.target_is_cortex_m` to Zig modules. The current CPU check is conservative and string-based: `-Dcpu` must start with `cortex_m`, `cortex-m`, or `cortexm`, case-insensitively.
+
+To bypass the CPU gate, use:
+
+```sh
+zig build -Dforce_CMSIS=true
+```
+
+`-Dforce_CMSIS=true` exports `build_options.force_cmsis` and makes the CMSIS gate return true even without `-Denable_CMSIS=true`. The flag does not add CMSIS C sources, include paths, wrappers, or QLinearConv dispatch; if those are missing later, the user owns the resulting build failure.
 
 ### Common Commands
 
@@ -50,5 +59,6 @@ This exports `build_options.enable_cmsis` to Zig modules. The switch is intended
 * **Generate a static memory plan:** `zig build lib-gen -Dmodel=my_model -Ddynamic=false -Dstatic_planning=enabled`
 * **Generate a static memory plan with branch-and-bound**: `zig build lib-gen -Dmodel=my_model -Ddynamic=false -Dstatic_planning=enabled -Dforce_bnb=true`
 * **Compile Static Lib:** `zig build lib -Dmodel=my_model -Dtarget=thumb-freestanding -Dcpu=cortex_m7`
+* **Compile Static Lib with CMSIS requested:** `zig build lib -Dmodel=my_model -Dtarget=thumb-freestanding -Dcpu=cortex_m7 -Denable_CMSIS=true`
 * **Run Unit Tests:** `zig build test`
 * **Run Benchmarks:** `zig build benchmark -Dfull=true`

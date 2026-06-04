@@ -150,11 +150,12 @@ These flags can be used with any build command:
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `-Dtarget` | string | `"native"` | Target architecture (e.g., "x86_64-linux", "thumb-freestanding") |
-| `-Dcpu` | string | `null` | Target CPU model (e.g., "cortex_m33") |
+| `-Dcpu` | string | `null` | Target CPU model (e.g., "cortex_m33"). CMSIS auto-detection accepts `cortex_m`, `cortex-m`, and `cortexm` prefixes, case-insensitively. |
 | `-Doptimize` | enum | `Debug` | Optimization mode: Debug, ReleaseFast, ReleaseSafe, ReleaseSmall |
 | `-Dtrace_allocator` | bool | `true` | Enable tracing allocator |
 | `-Dallocator` | string | `"raw_c_allocator"` | Allocator type to use |
-| `-Denable_CMSIS` | bool | `false` | Enable the CMSIS-NN integration switch exported internally as `build_options.enable_cmsis` |
+| `-Denable_CMSIS` | bool | `false` | Request CMSIS-NN usage when `-Dcpu` is detected as Cortex-M |
+| `-Dforce_CMSIS` | bool | `false` | Force CMSIS-NN usage even without `-Denable_CMSIS=true` or a Cortex-M `-Dcpu`; the user owns any later CMSIS build failure |
 
 ### Global Usage Examples
 ```bash
@@ -168,8 +169,11 @@ zig build lib -Dmodel="my_model" -Doptimize=ReleaseFast
 zig build lib -Dtarget=x86_64-windows -Doptimize=ReleaseSmall
 zig build lib -Dtarget=aarch64-macos -Doptimize=ReleaseSafe
 
-# Enable the CMSIS-NN integration switch
-zig build lib -Denable_CMSIS=true
+# Request CMSIS-NN usage for a detected Cortex-M CPU
+zig build lib -Denable_CMSIS=true -Dcpu=cortex_m33
+
+# Force CMSIS-NN usage regardless of CPU detection
+zig build lib -Dforce_CMSIS=true
 ```
 
 ## Common Workflows

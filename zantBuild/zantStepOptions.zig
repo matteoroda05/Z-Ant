@@ -27,6 +27,8 @@ pub const ZantStepOptions = struct {
 
         build_options.addOption(bool, "use_tensor_pool", zantOptions.codegen_flags.use_tensor_pool); //codegen
         build_options.addOption(bool, "enable_cmsis", zantOptions.cmsis_flags.enable_cmsis); //cmsis
+        build_options.addOption(bool, "force_cmsis", zantOptions.cmsis_flags.force_cmsis); //cmsis
+        build_options.addOption(bool, "target_is_cortex_m", zantOptions.cmsis_flags.target_is_cortex_m); //cmsis
 
         return build_options;
     }
