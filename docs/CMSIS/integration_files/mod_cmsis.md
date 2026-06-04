@@ -8,10 +8,11 @@ current build.
 
 ## Current Decision
 
-The module imports compile-time build options:
+The module does not import `build_options` at file scope. The caller passes the
+options module into `cmsisUsed()`:
 
 ```zig
-const build_options = @import("build_options");
+pub fn cmsisUsed(comptime build_options: type) bool
 ```
 
 `cmsisUsed()` returns true when either:
@@ -30,8 +31,8 @@ force_cmsis or (enable_cmsis and target_is_cortex_m)
 
 Each field access is guarded with `@hasDecl(build_options, "...")`.
 
-This keeps the module compile-safe if a build path imports `IR_zant` without
-all CMSIS-related build options being exported.
+This keeps the decision compile-safe when some CMSIS-related fields are missing
+from the provided options module.
 
 ## Behavior Boundaries
 
@@ -41,7 +42,8 @@ This module does not:
 - add CMSIS include paths;
 - call CMSIS kernels;
 - change QLinearConv dispatch;
+- require `build_options` just to be imported;
 - inspect Zig target metadata directly.
 
 It only answers the compile-time question: should CMSIS-NN be considered active
-for this build?
+for this build? Code that calls it should pass `@import("build_options")`.

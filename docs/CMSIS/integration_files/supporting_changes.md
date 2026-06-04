@@ -60,16 +60,17 @@ Adds `build_options` to the `IR_zant` module:
 IR_zant_mod.addOptions("build_options", zantStepOptions.build_step_option);
 ```
 
-Why this matters: `mod_cmsis.zig` lives under `IR_zant` and imports
-`build_options`. Without this module wiring, IR code would not be able to
-compile the CMSIS usage gate.
+Why this matters: future IR code that calls `cmsisUsed(...)` can pass
+`@import("build_options")` from the module wiring already used by `IR_zant`.
 
-## Explicit Non-Goals
+## `src/codegen/IR_zant.zig`
 
-These supporting changes do not:
+Re-exports the CMSIS helper module:
 
-- add CMSIS C sources;
-- add CMSIS include paths;
-- copy a CMSIS wrapper;
-- change QLinearConv dispatch;
-- implement full Zig target or CPU model detection.
+```zig
+pub const cmsis = @import("IR_zant/cmsis/mod_cmsis.zig");
+```
+
+Why this is safe: `mod_cmsis.zig` no longer imports `build_options` at file
+scope. Importing `IR_zant.cmsis` only loads the helper; callers must pass
+`@import("build_options")` when they actually call `cmsisUsed(...)`.
