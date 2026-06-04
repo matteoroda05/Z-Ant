@@ -16,15 +16,11 @@ result in `Cmsis_flags`.
 
 ## CPU Detection
 
-The file reads:
+This file reads the raw `-Dcpu` value from Zig's parsed user input:
 
 ```zig
-const cpu = b.option([]const u8, "cpu", "CPU model (e.g., cortex_m33)") orelse "";
+const cpu = readCpuOption(b);
 ```
-
-This is needed because `-Dcpu` is a build option value, not a global variable
-that other build files can automatically see. Reading it locally lets this file
-inspect the same flag without changing the broader build initialization flow.
 
 `cpuIsCortexM(cpu)` returns true only when the CPU string starts with one of
 these prefixes, case-insensitively:

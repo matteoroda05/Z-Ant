@@ -64,64 +64,6 @@ Why this matters: `mod_cmsis.zig` lives under `IR_zant` and imports
 `build_options`. Without this module wiring, IR code would not be able to
 compile the CMSIS usage gate.
 
-## `src/codegen/IR_zant.zig`
-
-Re-exports the CMSIS helper module:
-
-```zig
-pub const cmsis = @import("IR_zant/cmsis/mod_cmsis.zig");
-```
-
-Why this matters: operators that already import `IR_zant` can reach the CMSIS
-gate through `IR_zant.cmsis`, keeping the import pattern local and simple.
-
-## `src/codegen/IR_zant/op_union/operators/op_qlinearconv/op_qlinearconv.zig`
-
-Imports the CMSIS helper through `IR_zant`:
-
-```zig
-const cmsis = IR_zant.cmsis;
-```
-
-and adds a compile-time check:
-
-```zig
-comptime {
-    _ = cmsis.cmsisUsed();
-}
-```
-
-Why this matters: this proves that the `QLinearConv` area can import and
-compile the CMSIS usage gate. It intentionally does not change dispatch,
-operator behavior, generated code, or runtime execution.
-
-## `docs/BUILD_FLAGS.md`
-
-Documents the build-level CMSIS flags.
-
-Important documented behavior:
-
-- `-Denable_CMSIS=true` requests CMSIS usage.
-- `-Dcpu=...` is used for conservative Cortex-M detection.
-- `-Dforce_CMSIS=true` enables CMSIS usage even without `enable_CMSIS` or a
-  detected Cortex-M CPU.
-
-## `docs/ZANT_CLI.md`
-
-Documents the same CMSIS flags from the command-line usage perspective.
-
-Why this matters: users can see the difference between the guarded path:
-
-```sh
-zig build lib -Denable_CMSIS=true -Dcpu=cortex_m33
-```
-
-and the force path:
-
-```sh
-zig build lib -Dforce_CMSIS=true
-```
-
 ## Explicit Non-Goals
 
 These supporting changes do not:

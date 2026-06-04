@@ -8,7 +8,7 @@ pub const Cmsis_flags = struct {
     pub fn init(b: *std.Build) !Cmsis_flags {
         const enable_cmsis = b.option(bool, "enable_CMSIS", "Enable CMSIS-NN backend support") orelse false;
         const force_cmsis = b.option(bool, "force_CMSIS", "Force CMSIS-NN backend support") orelse false;
-        const cpu = b.option([]const u8, "cpu", "CPU model (e.g., cortex_m33)") orelse "";
+        const cpu = readCpuOption(b);
         const target_is_cortex_m = cpuIsCortexM(cpu);
 
         return Cmsis_flags{
@@ -18,6 +18,14 @@ pub const Cmsis_flags = struct {
         };
     }
 };
+
+fn readCpuOption(b: *std.Build) []const u8 {
+    const option = b.user_input_options.get("cpu") orelse return "";
+    return switch (option.value) {
+        .scalar => |cpu| cpu,
+        else => "",
+    };
+}
 
 fn cpuIsCortexM(cpu: []const u8) bool {
     return startsWithIgnoreCase(cpu, "cortex_m") or

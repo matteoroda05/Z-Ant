@@ -17,7 +17,6 @@ pub const onnx = @import("IR_zant/onnx.zig");
 pub const zant_utils = @import("zant_utils");
 pub const pkg_allocator = zant_utils.allocator;
 
-
 // === Internal sub-packages ===
 pub const core = struct {
     pub const tensor = @import("IR_zant/core/tensor.zig");
@@ -41,7 +40,6 @@ pub const Op_union = op_union_lib.Op_union;
 pub const operators = op_union_lib.operators;
 pub const fused_operators = op_union_lib.fused_operators;
 pub const utils = @import("IR_zant/utils.zig");
-pub const cmsis = @import("IR_zant/cmsis/mod_cmsis.zig");
 
 pub const pattern_matcher = @import("IR_zant/op_union/fused/pattern_matcher.zig");
 pub const pattern_collection = @import("IR_zant/op_union/fused/pattern_collection.zig");
