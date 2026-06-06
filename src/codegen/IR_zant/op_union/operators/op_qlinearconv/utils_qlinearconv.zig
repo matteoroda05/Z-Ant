@@ -1,5 +1,6 @@
 const std = @import("std");
 const IR_zant = @import("IR_zant");
+const build_options = @import("build_options");
 
 const SCALE_SHIFT: u5 = 16;
 
@@ -1071,9 +1072,12 @@ fn quantizeMultiplier(scale: f32, multiplier: *i32, shift: *i32) void {
     shift.* = exp;
 }
 
-/// Direct CMSIS-NN wrapper - passes quantized data directly with minimal overhead
-/// CMSIS-NN accelerated quantized convolution - direct implementation without fallback overhead
-/// Compile-time dispatch function that chooses the best implementation
+/// Dispatches QLinearConv to the active backend.
+///
+/// Normal builds use `qlinearconv_embedded_lean`. CMSIS-enabled builds first try
+/// the CMSIS-NN NCHW bridge; if that bridge reports an unsupported CMSIS case,
+/// dispatch falls back to the embedded implementation unless `force_CMSIS` is
+/// active.
 pub fn qlinearconv_dispatch(
     comptime InputType: anytype,
     comptime WeightType: anytype,
@@ -1096,6 +1100,39 @@ pub fn qlinearconv_dispatch(
     group: ?usize,
     auto_pad: []const u8,
 ) !void {
+    if (comptime IR_zant.cmsis.cmsisUsed(build_options)) {
+        const cmsis_qlinearconv = @import("cmsis_qlinearconv.zig");
+        cmsis_qlinearconv.qlinearconvNchwBridge(
+            InputType,
+            WeightType,
+            ScaleType,
+            void,
+            BiasType,
+            x,
+            x_scale,
+            x_zero_point,
+            w,
+            w_scale,
+            w_zero_point,
+            output,
+            y_scale,
+            y_zero_point,
+            bias,
+            stride,
+            pads,
+            dilations,
+            group,
+            auto_pad,
+        ) catch |err| switch (err) {
+            error.UnsupportedCmsisQLinearConv => {
+                if (comptime IR_zant.cmsis.cmsisForced(build_options)) {
+                    return err;
+                }
+            },
+            else => return err,
+        };
+    }
+
     return qlinearconv_embedded_lean(
         InputType,
         WeightType,

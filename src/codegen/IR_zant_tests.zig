@@ -5,6 +5,7 @@ const std = @import("std");
 comptime {
     // --- core ---
     _ = @import("IR_zant/core/tensor_test.zig");
+    _ = @import("IR_zant/cmsis/cmsis_test.zig");
 
     // --- IR graph ---
     _ = @import("IR_zant/tensorZant_test.zig");
