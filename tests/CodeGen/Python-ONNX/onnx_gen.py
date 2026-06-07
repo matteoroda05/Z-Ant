@@ -11,6 +11,8 @@ import os
 import pprint
 import traceback
 
+MAX_RUNTIME_RETRIES = 5
+
 # Import all the operator modules
 from operators.relu import generate_relu_model
 from operators.sigmoid import generate_sigmoid_model
@@ -335,59 +337,75 @@ def main():
     
     for op in supported_ops:
         for i in range(args.iterations):
-            print("Saving model to " + output_dir) 
             filename = f"{output_dir}{op}_{i}.onnx"
-            try: 
-                metadata = generate_model(op, filename, i)
-                print(f"Successfully generated model for {op} (ID: {i})")
-            except Exception as e:
-                print(f"Error generating model for {op} (ID: {i}): {e}")
-                traceback.print_exc()
-                continue
+            test_file_name = f"{output_dir}{op}_{i}_user_tests.json"
+            last_error = None
+            model_info = None
 
-            try:
+            for attempt in range(1, MAX_RUNTIME_RETRIES + 1):
+                print("Saving model to " + output_dir)
+                if attempt > 1:
+                    print(f"Retrying {op} (ID: {i}), attempt {attempt}/{MAX_RUNTIME_RETRIES}")
+
                 try:
-                    data = run_model(filename)
+                    metadata = generate_model(op, filename, i)
+                    print(f"Successfully generated model for {op} (ID: {i})")
                 except Exception as e:
-                    print(f"----------------------ERROR----------------------")
-                    raise e
+                    last_error = e
+                    print(f"Error generating model for {op} (ID: {i}): {e}")
+                    traceback.print_exc()
+                    continue
 
-                model_info = {
-                    "operation": op,
-                    "model_id": i,
-                    "inputs": data["inputs"],
-                    "outputs": data["outputs"],
-                    "metadata": metadata
-                }
-                
-                test_file_name = f"{output_dir}{op}_{i}_user_tests.json"
-                print(f"Saving user tests to {test_file_name}")
-                
-                user_tests = []
+                try:
+                    try:
+                        data = run_model(filename)
+                    except Exception as e:
+                        print(f"----------------------ERROR----------------------")
+                        raise e
 
-                for (in_key, out_key) in zip(data["inputs"].keys(), data["outputs"].keys()):
-                    in_array = np.array(data["inputs"][in_key]).flatten().tolist()
-                    out_array = np.array(data["outputs"][out_key]).flatten().tolist()
-                    
-                    test_model_info = {
-                        "name": op,
-                        "type": "exact",
-                        "input": in_array,
-                        "output": out_array,
-                        "expected_class": 0
+                    model_info = {
+                        "operation": op,
+                        "model_id": i,
+                        "inputs": data["inputs"],
+                        "outputs": data["outputs"],
+                        "metadata": metadata
                     }
-                    user_tests.append(test_model_info)
+                
+                    print(f"Saving user tests to {test_file_name}")
+                
+                    user_tests = []
 
-                with open(test_file_name, 'w') as f:
-                    json.dump(user_tests, f, indent=2)
-                print(f"Execution data saved to {test_file_name}")
+                    for (in_key, out_key) in zip(data["inputs"].keys(), data["outputs"].keys()):
+                        in_array = np.array(data["inputs"][in_key]).flatten().tolist()
+                        out_array = np.array(data["outputs"][out_key]).flatten().tolist()
                     
-                all_models.append(model_info)
-                print(f"Successfully ran model for {op} (ID: {i})")
-            except Exception as e:
-                print(f"#################################################")
-                print(f"Error running model for {op} (ID: {i}): {e} ")
-                # raise RuntimeError(f"unable to handle {op}")
+                        test_model_info = {
+                            "name": op,
+                            "type": "exact",
+                            "input": in_array,
+                            "output": out_array,
+                            "expected_class": 0
+                        }
+                        user_tests.append(test_model_info)
+
+                    with open(test_file_name, 'w') as f:
+                        json.dump(user_tests, f, indent=2)
+                    print(f"Execution data saved to {test_file_name}")
+                    
+                    all_models.append(model_info)
+                    print(f"Successfully ran model for {op} (ID: {i})")
+                    break
+                except Exception as e:
+                    last_error = e
+                    print(f"#################################################")
+                    print(f"Error running model for {op} (ID: {i}): {e} ")
+                    traceback.print_exc()
+
+            if model_info is None:
+                raise RuntimeError(
+                    f"Unable to generate runnable model and user tests for {op} (ID: {i}) "
+                    f"after {MAX_RUNTIME_RETRIES} attempts: {last_error}"
+                )
 
     
     with open(args.metadata_file, 'w') as f:
