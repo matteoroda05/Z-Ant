@@ -21,11 +21,13 @@ individual files from operator-specific folders.
 
 ## Current Decision
 
-The module does not import `build_options` at file scope. The caller passes the
-options module into `cmsisUsed()`:
+The module reads build options through the `zant_utils` owner module. Callers do
+not pass or import `build_options` directly:
 
 ```zig
-pub fn cmsisUsed(comptime build_options: type) bool
+const zant_utils = @import("zant_utils");
+
+pub fn cmsisUsed() bool
 ```
 
 `cmsisUsed()` returns true when either:
@@ -43,7 +45,7 @@ force_cmsis or (enable_cmsis and target_is_cortex_m)
 The forced branch is implemented through:
 
 ```zig
-pub fn cmsisForced(comptime build_options: type) bool
+pub fn cmsisForced() bool
 ```
 
 `cmsisForced()` returns true only when `force_cmsis` exists and is true. This is
@@ -52,10 +54,11 @@ may fall back to the embedded implementation or must fail visibly.
 
 ## Why `@hasDecl` Is Used
 
-Each field access is guarded with `@hasDecl(build_options, "...")`.
+Each field access is guarded with `@hasDecl(build_options, "...")` after
+loading `build_options` from `zant_utils.build_options`.
 
 This keeps the decision compile-safe when some CMSIS-related fields are missing
-from the provided options module.
+from the options module owned by `zant_utils`.
 
 ## Behavior Boundaries
 
@@ -64,12 +67,12 @@ This module does not:
 - add CMSIS sources;
 - add CMSIS include paths;
 - call CMSIS kernels;
-- require `build_options` just to be imported;
+- require QLinearConv utilities to import `build_options`;
 - inspect Zig target metadata directly.
 
 Its decision functions only answer compile-time questions about whether CMSIS-NN
 should be considered active or forced for this build. Code that calls them
-should pass `@import("build_options")`.
+should use `IR_zant.cmsis.cmsisUsed()` or `IR_zant.cmsis.cmsisForced()`.
 
 The layout and quant exports are pure Zig helper modules. They do not import
 `build_options` and do not activate CMSIS by themselves.

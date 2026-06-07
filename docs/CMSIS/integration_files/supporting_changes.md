@@ -9,6 +9,7 @@ files documented in this directory, including:
 - `src/codegen/IR_zant/cmsis/quant.zig`
 - `src/codegen/IR_zant/cmsis/cmsis_test.zig`
 - `src/codegen/IR_zant/op_union/operators/op_qlinearconv/cmsis_qlinearconv.zig`
+- `src/utils/utils.zig`
 - `zantBuild/cmsis_build.zig`
 
 ## Purpose
@@ -63,8 +64,13 @@ Adds `build_options` to the `IR_zant` module:
 IR_zant_mod.addOptions("build_options", zantStepOptions.build_step_option);
 ```
 
-Why this matters: future IR code that calls `cmsisUsed(...)` can pass
-`@import("build_options")` from the module wiring already used by `IR_zant`.
+Why this matters: IR code can reach CMSIS decisions through `IR_zant.cmsis`
+without importing `build_options` directly from operator files.
+
+## `src/utils/utils.zig`
+
+Re-exports `build_options` from the `zant_utils` owner module.
+This lets `IR_zant.cmsis` read CMSIS flags without operator files importing build options.
 
 ## `src/codegen/IR_zant.zig`
 
@@ -74,9 +80,8 @@ Re-exports the CMSIS helper module:
 pub const cmsis = @import("IR_zant/cmsis/mod_cmsis.zig");
 ```
 
-Why this is safe: `mod_cmsis.zig` no longer imports `build_options` at file
-scope. Importing `IR_zant.cmsis` only loads the helper; callers must pass
-`@import("build_options")` when they actually call `cmsisUsed(...)`.
+Why this is safe: `mod_cmsis.zig` reads `build_options` through the existing
+`zant_utils` owner module. Operator code imports only `IR_zant.cmsis`.
 
 ## `build.zig`
 
@@ -137,17 +142,11 @@ Why this matters: the shared layout and quantization helpers are part of
 
 ## `src/codegen/IR_zant/op_union/operators/op_qlinearconv/utils_qlinearconv.zig`
 
-Imports generated build options:
-
-```zig
-const build_options = @import("build_options");
-```
-
 Changes `qlinearconv_dispatch()` from always calling the embedded fallback to
 first trying CMSIS when the CMSIS gate is active:
 
 ```zig
-if (comptime IR_zant.cmsis.cmsisUsed(build_options)) {
+if (comptime IR_zant.cmsis.cmsisUsed()) {
     const cmsis_qlinearconv = @import("cmsis_qlinearconv.zig");
     cmsis_qlinearconv.qlinearconvNchwBridge(...);
 }
@@ -158,6 +157,6 @@ back to `qlinearconv_embedded_lean()` unless `IR_zant.cmsis.cmsisForced(...)` is
 true.
 
 Why this matters: `qlinearconv_dispatch()` remains the single backend decision
-point. Normal builds keep the existing embedded implementation. CMSIS builds
-can try the CMSIS bridge without changing the generator-facing QLinearConv
-interface.
+point without directly importing `build_options`. Normal builds keep the
+existing embedded implementation. CMSIS builds can try the CMSIS bridge without
+changing the generator-facing QLinearConv interface.

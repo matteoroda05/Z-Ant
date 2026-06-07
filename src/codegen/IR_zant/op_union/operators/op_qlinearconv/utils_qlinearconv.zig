@@ -1,6 +1,5 @@
 const std = @import("std");
 const IR_zant = @import("IR_zant");
-const build_options = @import("build_options");
 
 const SCALE_SHIFT: u5 = 16;
 
@@ -1100,7 +1099,7 @@ pub fn qlinearconv_dispatch(
     group: ?usize,
     auto_pad: []const u8,
 ) !void {
-    if (comptime IR_zant.cmsis.cmsisUsed(build_options)) {
+    if (comptime IR_zant.cmsis.cmsisUsed()) {
         const cmsis_qlinearconv = @import("cmsis_qlinearconv.zig");
         cmsis_qlinearconv.qlinearconvNchwBridge(
             InputType,
@@ -1125,7 +1124,7 @@ pub fn qlinearconv_dispatch(
             auto_pad,
         ) catch |err| switch (err) {
             error.UnsupportedCmsisQLinearConv => {
-                if (comptime IR_zant.cmsis.cmsisForced(build_options)) {
+                if (comptime IR_zant.cmsis.cmsisForced()) {
                     return err;
                 }
             },

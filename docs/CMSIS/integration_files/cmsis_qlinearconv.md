@@ -23,9 +23,9 @@ The CMSIS call becomes reachable through this path:
    `tensMath.qlinear_conv_dispatch(...)`.
 5. `zant_math_standard.zig` exports `qlinear_conv_dispatch` from
    `utils_qlinearconv.zig`.
-6. `qlinearconv_dispatch(...)` checks `IR_zant.cmsis.cmsisUsed(build_options)`
-   at compile time. If CMSIS is active, it imports `cmsis_qlinearconv.zig` and
-   calls `qlinearconvNchwBridge(...)`; otherwise it calls the embedded fallback.
+6. `qlinearconv_dispatch(...)` checks `IR_zant.cmsis.cmsisUsed()` at compile
+   time. If CMSIS is active, it imports `cmsis_qlinearconv.zig` and calls
+   `qlinearconvNchwBridge(...)`; otherwise it calls the embedded fallback.
 
 Generated model code therefore names the dispatch symbol, not
 `qlinearconvNchwBridge(...)` or `qlinearconvNhwcBridge(...)` directly.
