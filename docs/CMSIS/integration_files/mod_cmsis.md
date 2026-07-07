@@ -47,27 +47,14 @@ const zant_utils = @import("zant_utils");
 pub fn cmsisUsed() bool
 ```
 
-`cmsisUsed()` returns true when either:
-
-- `force_cmsis` exists and is true; or
-- `enable_cmsis` exists and is true, and `target_is_cortex_m` exists and is
-  true.
+`cmsisUsed()` returns true when `enable_cmsis` exists and is true, and
+`target_is_cortex_m` exists and is true.
 
 In compact form:
 
 ```zig
-force_cmsis or (enable_cmsis and target_is_cortex_m)
+enable_cmsis and target_is_cortex_m
 ```
-
-The forced branch is implemented through:
-
-```zig
-pub fn cmsisForced() bool
-```
-
-`cmsisForced()` returns true only when `force_cmsis` exists and is true. This is
-used by QLinearConv dispatch to decide whether unsupported CMSIS bridge cases
-may fall back to the embedded implementation or must fail visibly.
 
 ## Why `@hasDecl` Is Used
 
@@ -87,9 +74,9 @@ This module does not:
 - require QLinearConv utilities to import `build_options`;
 - inspect Zig target metadata directly.
 
-Its decision functions only answer compile-time questions about whether CMSIS-NN
-should be considered active or forced for this build. Code that calls them
-should use `IR_zant.cmsis.cmsisUsed()` or `IR_zant.cmsis.cmsisForced()`.
+Its decision function only answers a compile-time question about whether
+CMSIS-NN should be considered active for this build. Code that calls it should
+use `IR_zant.cmsis.cmsisUsed()`.
 
 The layout and quant exports are pure Zig helper modules. They do not import
 `build_options` and do not activate CMSIS by themselves.

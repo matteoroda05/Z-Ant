@@ -11,7 +11,6 @@ The Z-Ant build system is highly configurable. You can pass these flags to the `
 | `-Dtrace_allocator` | bool | `true` | Use a tracing allocator for memory debugging | All |
 | `-Dallocator` | string | `"raw_c_allocator"` | Underlying allocator to use | All |
 | `-Denable_CMSIS` | bool | `false` | Request CMSIS-NN usage. The CMSIS gate uses this only when `-Dcpu` is detected as Cortex-M. | Build modules |
-| `-Dforce_CMSIS` | bool | `false` | Force CMSIS-NN usage even when `-Denable_CMSIS` is not set or `-Dcpu` is not detected as Cortex-M. The user is responsible for any later CMSIS build failure. | Build modules |
 | **Codegen & Model Options** | | | | |
 | `-Dmodel` | string | `"mnist-8"` | Name of the model to process | `lib-gen`, `lib-exe`, `lib`, `lib-test` |
 | `-Dmodel_path` | string | `datasets/...` | Path to the ONNX model file. Defaults to `datasets/models/{model}/{model}.onnx` | `lib-gen`, `lib-exe` |
@@ -43,15 +42,7 @@ Request CMSIS-NN usage with:
 zig build -Denable_CMSIS=true -Dcpu=cortex_m7
 ```
 
-This exports `build_options.enable_cmsis` and `build_options.target_is_cortex_m` to Zig modules. The current CPU check is conservative and string-based: `-Dcpu` must start with `cortex_m`, `cortex-m`, or `cortexm`, case-insensitively.
-
-To bypass the CPU gate, use:
-
-```sh
-zig build -Dforce_CMSIS=true
-```
-
-`-Dforce_CMSIS=true` exports `build_options.force_cmsis` and makes the CMSIS gate return true even without `-Denable_CMSIS=true`. The flag does not add CMSIS C sources, include paths, wrappers, or QLinearConv dispatch; if those are missing later, the user owns the resulting build failure.
+This exports `build_options.enable_cmsis` and `build_options.target_is_cortex_m` to Zig modules. The current CPU check is conservative and string-based: `-Dcpu` must start with `cortex_m`, `cortex-m`, or `cortexm`, case-insensitively. `-Dcpu=cortex_m*` is valid for host (native-target) builds too — `build.zig` only feeds `-Dcpu` into the native target-query resolution when cross-compiling, so a Cortex-M `-Dcpu` value on a native build activates the CMSIS gate without corrupting the host target.
 
 ### Common Commands
 

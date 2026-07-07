@@ -1075,8 +1075,7 @@ fn quantizeMultiplier(scale: f32, multiplier: *i32, shift: *i32) void {
 ///
 /// Normal builds use `qlinearconv_embedded_lean`. CMSIS-enabled builds first try
 /// the CMSIS-NN NCHW bridge; if that bridge reports an unsupported CMSIS case,
-/// dispatch falls back to the embedded implementation unless `force_CMSIS` is
-/// active.
+/// dispatch falls back to the embedded implementation.
 pub fn qlinearconv_dispatch(
     comptime InputType: anytype,
     comptime WeightType: anytype,

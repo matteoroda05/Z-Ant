@@ -48,13 +48,12 @@ Exports the CMSIS decisions into the generated `build_options` module.
 Added exported options:
 
 - `enable_cmsis`
-- `force_cmsis`
 - `target_is_cortex_m`
 
 Why this matters: IR code cannot directly read `std.Build` options. It can only
 see values exported through build-step options. These fields are what make
-`@import("build_options").enable_cmsis`, `force_cmsis`, and
-`target_is_cortex_m` visible at comptime.
+`@import("build_options").enable_cmsis` and `target_is_cortex_m` visible at
+comptime.
 
 ## `zantBuild/zantModules.zig`
 

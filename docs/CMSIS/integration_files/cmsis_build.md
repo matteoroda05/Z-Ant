@@ -22,7 +22,7 @@ operator code and out of repeated `build.zig` call sites.
 - `configureCmsisRuntimeArtifact(...)`: adds include paths, C sources, C flags,
   and libc linkage to a runtime artifact only when CMSIS is requested.
 - `cmsisRequested(...)`: mirrors the runtime CMSIS gate at build time:
-  `force_cmsis or (enable_cmsis and target_is_cortex_m)`.
+  `enable_cmsis and target_is_cortex_m`.
 
 ## Motivation
 

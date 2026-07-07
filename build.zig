@@ -19,10 +19,11 @@ pub fn build(b: *std.Build) void {
     // Get target and CPU options from command line or use defaults
     const target_str = b.option([]const u8, "target", "Target architecture (e.g., thumb-freestanding)") orelse "native";
     const cpu_str = b.option([]const u8, "cpu", "CPU model (e.g., cortex_m33)");
+    const is_native_target = std.mem.eql(u8, target_str, "native");
 
     const target_query = std.Target.Query.parse(.{
         .arch_os_abi = target_str,
-        .cpu_features = cpu_str,
+        .cpu_features = if (is_native_target) null else cpu_str,
     }) catch |err| {
         std.log.scoped(.build).warn("Error parsing target: {}\n", .{err});
         return;

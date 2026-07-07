@@ -84,7 +84,7 @@ pub fn configureCmsisRuntimeArtifact(b: *std.Build, artifact: *std.Build.Step.Co
 }
 
 /// Mirrors the runtime CMSIS gate at build time so include paths and C sources
-/// are only attached for requested Cortex-M CMSIS builds or forced CMSIS builds.
+/// are only attached for requested Cortex-M CMSIS builds.
 fn cmsisRequested(flags: CmsisFlags) bool {
-    return flags.force_cmsis or (flags.enable_cmsis and flags.target_is_cortex_m);
+    return flags.enable_cmsis and flags.target_is_cortex_m;
 }

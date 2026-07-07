@@ -13,7 +13,7 @@ outdated `feat/CMSIS-integration` branch described in `deep-research-report.md`.
 - **The architecture gate is real** (the old branch's hardcoded
   `targetIsCortex = true` is gone): `cmsis_flags.zig` derives
   `target_is_cortex_m` from `-Dcpu` via `cpuIsCortexM`, and
-  `cmsisUsed() = force_cmsis or (enable_cmsis and target_is_cortex_m)`.
+  `cmsisUsed() = enable_cmsis and target_is_cortex_m`.
 - **Codegen-time preparation.** `IR_zant/cmsis/prepare.zig` precomputes the static
   CMSIS data (OHWI `i8` filter, `i32` bias, per-channel multiplier/shift) at
   lib-gen and emits it into `static_parameters.zig` as `cmsis_` constants; the

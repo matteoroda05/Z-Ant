@@ -11,7 +11,6 @@ result in `Cmsis_flags`.
 `Cmsis_flags` currently stores:
 
 - `enable_cmsis`: set by `-Denable_CMSIS=true`.
-- `force_cmsis`: set by `-Dforce_CMSIS=true`.
 - `target_is_cortex_m`: derived from the `-Dcpu` string.
 
 ## CPU Detection
@@ -48,7 +47,11 @@ The detection only trusts explicit Cortex-M-looking CPU names. If the user does
 not pass `-Dcpu`, `target_is_cortex_m` remains false.
 
 This prevents `-Denable_CMSIS=true` from enabling CMSIS on unknown, host, or
-non-Cortex-M builds.
+non-Cortex-M builds. `-Dcpu=cortex_m*` is valid for host (native-target) builds
+too: `build.zig` only feeds `-Dcpu` into the native target-query resolution
+when cross-compiling, so this file's independent read of `-Dcpu` (via
+`b.user_input_options`) still activates the gate without corrupting the host
+target.
 
 ### Future Target Detection
 
@@ -63,13 +66,8 @@ build_options.target_is_cortex_m
 So `mod_cmsis.zig` can keep using:
 
 ```zig
-force_cmsis or (enable_cmsis and target_is_cortex_m)
+enable_cmsis and target_is_cortex_m
 ```
-
-## Force Mode
-
-`-Dforce_CMSIS=true` records `force_cmsis = true` independently of
-`enable_cmsis` and `target_is_cortex_m`.
 
 The actual decision to use CMSIS is made in `mod_cmsis.zig`; this file only
 collects and derives the build flags.

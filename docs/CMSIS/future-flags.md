@@ -40,7 +40,6 @@ the `int32` conv accumulator back into `int8` (per-channel multiply → round �
 | Option | What it does | Status today |
 |--------|--------------|--------------|
 | Configurable CMSIS path (e.g. `-Dcmsis_path=…`) | Let the build point at an existing CMSIS install instead of the in-repo `third_party/…` copy. | `cmsis_path` is commented out in `cmsis_flags.zig`; include paths are hardcoded to `third_party/`. Pairs with the "vendor the sources" task (bundled copy *or* external pointer). |
-| `-Dcpu=cortex_m*` lib-gen ergonomics | Accept a Cortex-M `-Dcpu` for host lib-gen (driving `target_is_cortex_m`) without the native-target parser erroring. | Currently `-Dcpu=cortex_m7` fails host lib-gen; the workaround is `-Dforce_CMSIS=true`. A small `build.zig` guard would fix it. Developer-experience only. |
 
 ---
 
@@ -48,7 +47,7 @@ the `int32` conv accumulator back into `int8` (per-channel multiply → round �
 
 - **1a** = pick a numeric/rounding contract and make your reference match it.
 - **1b** = speed toggles that leave results identical (Helium-only or M7-favoring).
-- **2** = build flexibility and developer ergonomics, no effect on kernel math.
+- **2** = build flexibility, no effect on kernel math.
 
 All of this is post-parity: reach for it only after the CMSIS sources are vendored,
 depthwise + grouped QLinearConv are in, and you're moving to Helium chips or

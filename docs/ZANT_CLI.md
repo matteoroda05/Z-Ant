@@ -155,7 +155,6 @@ These flags can be used with any build command:
 | `-Dtrace_allocator` | bool | `true` | Enable tracing allocator |
 | `-Dallocator` | string | `"raw_c_allocator"` | Allocator type to use |
 | `-Denable_CMSIS` | bool | `false` | Request CMSIS-NN usage when `-Dcpu` is detected as Cortex-M |
-| `-Dforce_CMSIS` | bool | `false` | Force CMSIS-NN usage even without `-Denable_CMSIS=true` or a Cortex-M `-Dcpu`; the user owns any later CMSIS build failure |
 
 ### Global Usage Examples
 ```bash
@@ -169,11 +168,8 @@ zig build lib -Dmodel="my_model" -Doptimize=ReleaseFast
 zig build lib -Dtarget=x86_64-windows -Doptimize=ReleaseSmall
 zig build lib -Dtarget=aarch64-macos -Doptimize=ReleaseSafe
 
-# Request CMSIS-NN usage for a detected Cortex-M CPU
+# Request CMSIS-NN usage for a detected Cortex-M CPU (works for host/native builds too)
 zig build lib -Denable_CMSIS=true -Dcpu=cortex_m33
-
-# Force CMSIS-NN usage regardless of CPU detection
-zig build lib -Dforce_CMSIS=true
 ```
 
 ## Common Workflows
