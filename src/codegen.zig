@@ -195,7 +195,7 @@ pub fn codeGenerateFromLinearizedGraph(
     linearizedGraph: std.ArrayList(*NodeZant),
     codegen_parameters: CodegenParameters,
 ) !void {
-    try ParametersWriter.write(generated_path);
+    try ParametersWriter.write(generated_path, linearizedGraph.items);
 
     try PredictWriter.write(generated_path, model_name, linearizedGraph, codegen_parameters);
 

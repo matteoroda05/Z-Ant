@@ -1099,39 +1099,11 @@ pub fn qlinearconv_dispatch(
     group: ?usize,
     auto_pad: []const u8,
 ) !void {
-    if (comptime IR_zant.cmsis.cmsisUsed()) {
-        const cmsis_qlinearconv = @import("cmsis_qlinearconv.zig");
-        cmsis_qlinearconv.qlinearconvNchwBridge(
-            InputType,
-            WeightType,
-            ScaleType,
-            void,
-            BiasType,
-            x,
-            x_scale,
-            x_zero_point,
-            w,
-            w_scale,
-            w_zero_point,
-            output,
-            y_scale,
-            y_zero_point,
-            bias,
-            stride,
-            pads,
-            dilations,
-            group,
-            auto_pad,
-        ) catch |err| switch (err) {
-            error.UnsupportedCmsisQLinearConv => {
-                if (comptime IR_zant.cmsis.cmsisForced()) {
-                    return err;
-                }
-            },
-            else => return err,
-        };
-    }
-
+    // Non-preparable QLinearConv nodes take the embedded path. The runtime CMSIS
+    // on-the-fly bridge was removed: preparable nodes are accelerated by the
+    // codegen-prepared path (`qlinearconv_dispatch_cmsis_prepared`), and every
+    // other node the CMSIS bridge could handle would also be prepared at codegen,
+    // so there is nothing left for this dispatcher to try at runtime.
     return qlinearconv_embedded_lean(
         InputType,
         WeightType,
@@ -1148,6 +1120,51 @@ pub fn qlinearconv_dispatch(
         y_scale,
         y_zero_point,
         bias,
+        stride,
+        pads,
+        dilations,
+        group,
+        auto_pad,
+    );
+}
+
+/// Dispatches a QLinearConv node whose CMSIS constants were prepared at
+/// code-generation time.
+///
+/// The filter/bias/requant arrays are passed in as (flash-resident) slices, so
+/// this only calls the layout-only prepared bridge. There is deliberately **no**
+/// embedded fallback: the generator emits calls here only for nodes that
+/// `isCmsisSupported` already accepted, and the original weight/bias were dropped
+/// from `static_parameters.zig`, so there is nothing to fall back to.
+pub fn qlinearconv_dispatch_cmsis_prepared(
+    comptime InputType: anytype,
+    x: *const Tensor(InputType),
+    x_zero_point: anytype,
+    output: *Tensor(InputType),
+    y_zero_point: anytype,
+    filter_data: []const i8,
+    filter_shape: [4]usize,
+    bias: []const i32,
+    multipliers: []const i32,
+    shifts: []const i32,
+    stride: ?[]const usize,
+    pads: ?[]const usize,
+    dilations: ?[]const usize,
+    group: ?usize,
+    auto_pad: []const u8,
+) !void {
+    const cmsis_qlinearconv = @import("cmsis_qlinearconv.zig");
+    return cmsis_qlinearconv.qlinearconvNchw(
+        InputType,
+        x,
+        x_zero_point,
+        output,
+        y_zero_point,
+        filter_data,
+        filter_shape,
+        bias,
+        multipliers,
+        shifts,
         stride,
         pads,
         dilations,

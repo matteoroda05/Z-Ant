@@ -256,55 +256,113 @@ pub const QLinearConv = struct {
         // Determine the bias type
         const bias_type = if (self.input_B) |bias_tensor| bias_tensor.ty.toString() else "f32";
 
-        // Use compile-time dispatch function that chooses implementation based on CMSIS flags
-        const qlinearconv_impl = "qlinear_conv_dispatch";
-        try writer.print(
-            \\    tensMath.{s}(
-            \\        {s}, // InputType
-            \\        {s}, // WeightType
-            \\        {s}, // ScaleType
-            \\        {s}, // OutputType
-            \\        {s}, // BiasType
-            \\        {s}, // input x
-            \\        @constCast(&param_lib.tensor_{s}), // x_scale
-            \\        @constCast(&param_lib.tensor_{s}), // x_zero_point
-            \\        @constCast(&param_lib.tensor_{s}), // w
-            \\        @constCast(&param_lib.tensor_{s}), // w_scale
-            \\        @constCast(&param_lib.tensor_{s}), // w_zero_point
-            \\        &tensor_{s}, // output
-            \\        @constCast(&param_lib.tensor_{s}), // y_scale
-            \\        @constCast(&param_lib.tensor_{s}), // y_zero_point
-            \\        {s}, // bias
-            \\        {s}, // stride
-            \\        {s}, // pads
-            \\        {s}, // dilations
-            \\        {d}, // group
-            \\        "{s}", // auto_pad
-            \\    ) catch return {d};
-        , .{
-            qlinearconv_impl,
-            target_type, // InputType
-            self.input_w.ty.toString(), // WeightType (use actual weight type)
-            "f32", // ScaleType (scales are always f32)
-            self.output_y.ty.toString(), // OutputType (use actual output type)
-            bias_type, // BiasType (use actual bias type or f32 default)
-            tensor_x_string, // input x
-            x_scale_name, // x_scale
-            x_zero_point_name, // x_zero_point
-            w_name, // w
-            w_scale_name, // w_scale
-            w_zero_point_name, // w_zero_point
-            try utils.getSanitizedName(self.output_y.name), // output
-            y_scale_name, // y_scale
-            y_zero_point_name, // y_zero_point
-            bias_string, // bias
-            stride_string, // stride
-            pads_string, // pads
-            dilat_string, // dilations
-            self.group, // group
-            self.auto_pad, // auto_pad
-            utils.getMathErrorReturn(), // Error code for math errors
-        });
+        // On CMSIS builds, a preparable node dispatches to the prepared bridge
+        // and references the codegen-time `cmsis_` constants; its original
+        // weight/scale/zero-point/bias are no longer emitted. Otherwise emit the
+        // standard dispatcher call. `getMathErrorReturn()` is invoked in exactly
+        // one branch.
+        const use_prepared = IR_zant.cmsis.cmsisUsed() and IR_zant.cmsis.prepare.qlinearconv_isSupported(&self);
+
+        if (use_prepared) {
+            const w_sani = try utils.getSanitizedName(self.input_w.name);
+            const out_sani = try utils.getSanitizedName(self.output_y.name);
+
+            // Bias constant name: bias-keyed when the node has a bias tensor,
+            // otherwise output-keyed (matches parameters.zig emission).
+            const bias_symbol = if (self.input_B) |input_B| blk: {
+                if (input_B.name.len > 0) {
+                    break :blk try std.mem.concat(allocator, u8, &[_][]const u8{ "cmsis_tensor_", try utils.getSanitizedName(input_B.name) });
+                }
+                break :blk try std.mem.concat(allocator, u8, &[_][]const u8{ "cmsis_tensor_", out_sani, "_bias" });
+            } else try std.mem.concat(allocator, u8, &[_][]const u8{ "cmsis_tensor_", out_sani, "_bias" });
+
+            try writer.print(
+                \\    tensMath.qlinear_conv_dispatch_cmsis_prepared(
+                \\        {s}, // InputType
+                \\        {s}, // input x
+                \\        @constCast(&param_lib.tensor_{s}), // x_zero_point
+                \\        &tensor_{s}, // output
+                \\        @constCast(&param_lib.tensor_{s}), // y_zero_point
+                \\        &param_lib.cmsis_tensor_{s}, // filter_data
+                \\        param_lib.cmsis_tensor_{s}_filter_shape, // filter_shape
+                \\        &param_lib.{s}, // bias
+                \\        &param_lib.cmsis_tensor_{s}_multiplier, // multipliers
+                \\        &param_lib.cmsis_tensor_{s}_shift, // shifts
+                \\        {s}, // stride
+                \\        {s}, // pads
+                \\        {s}, // dilations
+                \\        {d}, // group
+                \\        "{s}", // auto_pad
+                \\    ) catch return {d};
+            , .{
+                target_type, // InputType
+                tensor_x_string, // input x
+                x_zero_point_name, // x_zero_point
+                out_sani, // output
+                y_zero_point_name, // y_zero_point
+                w_sani, // filter_data
+                w_sani, // filter_shape
+                bias_symbol, // bias
+                out_sani, // multipliers
+                out_sani, // shifts
+                stride_string, // stride
+                pads_string, // pads
+                dilat_string, // dilations
+                self.group, // group
+                self.auto_pad, // auto_pad
+                utils.getMathErrorReturn(), // Error code for math errors
+            });
+        } else {
+            // Use compile-time dispatch function that chooses implementation based on CMSIS flags
+            const qlinearconv_impl = "qlinear_conv_dispatch";
+            try writer.print(
+                \\    tensMath.{s}(
+                \\        {s}, // InputType
+                \\        {s}, // WeightType
+                \\        {s}, // ScaleType
+                \\        {s}, // OutputType
+                \\        {s}, // BiasType
+                \\        {s}, // input x
+                \\        @constCast(&param_lib.tensor_{s}), // x_scale
+                \\        @constCast(&param_lib.tensor_{s}), // x_zero_point
+                \\        @constCast(&param_lib.tensor_{s}), // w
+                \\        @constCast(&param_lib.tensor_{s}), // w_scale
+                \\        @constCast(&param_lib.tensor_{s}), // w_zero_point
+                \\        &tensor_{s}, // output
+                \\        @constCast(&param_lib.tensor_{s}), // y_scale
+                \\        @constCast(&param_lib.tensor_{s}), // y_zero_point
+                \\        {s}, // bias
+                \\        {s}, // stride
+                \\        {s}, // pads
+                \\        {s}, // dilations
+                \\        {d}, // group
+                \\        "{s}", // auto_pad
+                \\    ) catch return {d};
+            , .{
+                qlinearconv_impl,
+                target_type, // InputType
+                self.input_w.ty.toString(), // WeightType (use actual weight type)
+                "f32", // ScaleType (scales are always f32)
+                self.output_y.ty.toString(), // OutputType (use actual output type)
+                bias_type, // BiasType (use actual bias type or f32 default)
+                tensor_x_string, // input x
+                x_scale_name, // x_scale
+                x_zero_point_name, // x_zero_point
+                w_name, // w
+                w_scale_name, // w_scale
+                w_zero_point_name, // w_zero_point
+                try utils.getSanitizedName(self.output_y.name), // output
+                y_scale_name, // y_scale
+                y_zero_point_name, // y_zero_point
+                bias_string, // bias
+                stride_string, // stride
+                pads_string, // pads
+                dilat_string, // dilations
+                self.group, // group
+                self.auto_pad, // auto_pad
+                utils.getMathErrorReturn(), // Error code for math errors
+            });
+        }
     }
 
     pub fn compute_output_shape(self: QLinearConv) ![]usize {

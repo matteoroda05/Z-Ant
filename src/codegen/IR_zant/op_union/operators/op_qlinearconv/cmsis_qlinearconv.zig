@@ -10,45 +10,53 @@ const c = @cImport({
     @cInclude("arm_nnfunctions.h");
 });
 
-/// Executes QLinearConv through the CMSIS-NN `arm_convolve_wrapper_s8` path.
+/// Executes a codegen-prepared QLinearConv whose activations are stored NCHW.
 ///
-/// The current Z-Ant QLinearConv ABI uses NCHW activations and OIHW filters.
-/// CMSIS-NN expects signed NHWC activations and OHWI filters, so this bridge
-/// performs layout conversion, signed-domain conversion, per-channel requant
-/// setup, scratch-buffer allocation, the CMSIS call, and output conversion back
-/// into the caller-owned NCHW output tensor.
-pub fn qlinearconvNchwBridge(
+/// The filter (OHWI `i8`), bias (`i32`), and per-channel requant multiplier/shift
+/// arrays are precomputed at code-generation time (see `prepare.zig`) and passed
+/// in as (typically flash-resident) `const` slices. This function therefore does
+/// only the input-dependent work: the NCHW->NHWC input transpose, the `u8`->`i8`
+/// activation shift, the CMSIS call, and the NHWC->NCHW output writeback. It has
+/// no embedded fallback — the generator only emits calls to it for nodes
+/// `isCmsisSupported` already accepted.
+pub fn qlinearconvNchw(
     comptime InputType: anytype,
-    comptime WeightType: anytype,
-    comptime ScaleType: anytype,
-    comptime _: anytype,
-    comptime BiasType: anytype,
     x: *const Tensor(InputType),
-    x_scale: *const Tensor(ScaleType),
     x_zero_point: anytype,
-    w: *const Tensor(WeightType),
-    w_scale: *const Tensor(ScaleType),
-    w_zero_point: anytype,
     output: *Tensor(InputType),
-    y_scale: *const Tensor(ScaleType),
     y_zero_point: anytype,
-    bias: ?*const Tensor(BiasType),
+    filter_data: []const i8,
+    filter_shape: [4]usize,
+    bias: []const i32,
+    multipliers: []const i32,
+    shifts: []const i32,
     stride: ?[]const usize,
     pads: ?[]const usize,
     dilations: ?[]const usize,
     group: ?usize,
     auto_pad: []const u8,
 ) !void {
-    const actual_group = try validateBridgeInputs(InputType, WeightType, x, w, output, group, auto_pad);
+    if (comptime !isCmsisActivation(InputType)) return error.UnsupportedCmsisQLinearConv;
+    if (auto_pad.len != 0 and !std.mem.eql(u8, auto_pad, "NOTSET")) return error.UnsupportedCmsisQLinearConv;
+    if (x.shape.len != 4 or output.shape.len != 4) return error.InvalidDimensions;
 
-    const out_channels = w.shape[0];
-    if (out_channels != output.shape[1]) return error.InvalidDimensions;
+    const actual_group = group orelse 1;
+    if (actual_group != 1) return error.UnsupportedCmsisQLinearConv;
+
+    const out_channels = output.shape[1];
+    if (filter_shape[0] != out_channels) return error.InvalidDimensions;
+    if (bias.len < out_channels or multipliers.len < out_channels or shifts.len < out_channels) {
+        return error.InvalidDimensions;
+    }
 
     var input_nhwc = try cmsis_layout.nchwToNhwc(InputType, &pkg_allocator, @constCast(x));
     defer {
         input_nhwc.deinit();
         pkg_allocator.destroy(input_nhwc);
     }
+
+    var input_s8 = try cmsis_quant.prepareActivationS8(InputType, &pkg_allocator, input_nhwc);
+    defer input_s8.deinit();
 
     var output_nhwc_shape = [_]usize{
         output.shape[0],
@@ -59,169 +67,113 @@ pub fn qlinearconvNchwBridge(
     var output_s8_nhwc = try Tensor(i8).fromShape(&pkg_allocator, &output_nhwc_shape);
     defer output_s8_nhwc.deinit();
 
-    try qlinearconvCmsisNhwcCore(
-        InputType,
-        WeightType,
-        ScaleType,
-        BiasType,
-        input_nhwc,
-        x_scale,
-        x_zero_point,
-        w,
-        w_scale,
-        w_zero_point,
-        &output_s8_nhwc,
-        y_scale,
-        y_zero_point,
+    const offsets = cmsis_quant.makeActivationOffsets(InputType, x_zero_point, y_zero_point);
+
+    try runCmsisConvolve(
+        &input_s8.tensor,
+        filter_data,
+        filter_shape,
         bias,
+        multipliers,
+        shifts,
+        offsets,
         stride,
         pads,
         dilations,
-        actual_group,
+        &output_s8_nhwc,
     );
 
     try cmsis_quant.writeS8NhwcOutputToNchw(InputType, &output_s8_nhwc, output);
 }
 
-/// Executes QLinearConv when activation tensors already use CMSIS's NHWC layout.
+/// Executes a codegen-prepared QLinearConv whose activations are already NHWC.
 ///
-/// This bridge assumes `x` and `output` are `[N, H, W, C]` tensors, so it does
-/// not perform NCHW/NHWC activation layout conversion. It still performs all
-/// other CMSIS adaptations: signed activation conversion, OIHW-to-OHWI filter
-/// packing, zero-point handling, bias conversion, requantization setup,
-/// scratch-buffer allocation, and the `arm_convolve_wrapper_s8` call.
-pub fn qlinearconvNhwcBridge(
+/// Identical to `qlinearconvNchw` except the input and output tensors already use
+/// CMSIS's `[N, H, W, C]` layout, so no NCHW<->NHWC transpose is performed. The
+/// only runtime work is the `u8`->`i8` activation shift, the CMSIS call, and the
+/// signed-domain output writeback. The filter/bias/requant slices are precomputed
+/// at code-generation time. Not currently emitted by the generator (Z-Ant stores
+/// activations NCHW); provided for a future NHWC-native path.
+pub fn qlinearconvNhwc(
     comptime InputType: anytype,
-    comptime WeightType: anytype,
-    comptime ScaleType: anytype,
-    comptime _: anytype,
-    comptime BiasType: anytype,
     x: *const Tensor(InputType),
-    x_scale: *const Tensor(ScaleType),
     x_zero_point: anytype,
-    w: *const Tensor(WeightType),
-    w_scale: *const Tensor(ScaleType),
-    w_zero_point: anytype,
     output: *Tensor(InputType),
-    y_scale: *const Tensor(ScaleType),
     y_zero_point: anytype,
-    bias: ?*const Tensor(BiasType),
+    filter_data: []const i8,
+    filter_shape: [4]usize,
+    bias: []const i32,
+    multipliers: []const i32,
+    shifts: []const i32,
     stride: ?[]const usize,
     pads: ?[]const usize,
     dilations: ?[]const usize,
     group: ?usize,
     auto_pad: []const u8,
 ) !void {
-    const actual_group = try validateBridgeInputs(InputType, WeightType, x, w, output, group, auto_pad);
+    if (comptime !isCmsisActivation(InputType)) return error.UnsupportedCmsisQLinearConv;
+    if (auto_pad.len != 0 and !std.mem.eql(u8, auto_pad, "NOTSET")) return error.UnsupportedCmsisQLinearConv;
+    if (x.shape.len != 4 or output.shape.len != 4) return error.InvalidDimensions;
 
-    const out_channels = w.shape[0];
-    if (out_channels != output.shape[3]) return error.InvalidDimensions;
+    const actual_group = group orelse 1;
+    if (actual_group != 1) return error.UnsupportedCmsisQLinearConv;
+
+    const out_channels = output.shape[3];
+    if (filter_shape[0] != out_channels) return error.InvalidDimensions;
+    if (bias.len < out_channels or multipliers.len < out_channels or shifts.len < out_channels) {
+        return error.InvalidDimensions;
+    }
+
+    var input_s8 = try cmsis_quant.prepareActivationS8(InputType, &pkg_allocator, x);
+    defer input_s8.deinit();
 
     var output_s8_nhwc = try Tensor(i8).fromShape(&pkg_allocator, output.shape);
     defer output_s8_nhwc.deinit();
 
-    try qlinearconvCmsisNhwcCore(
-        InputType,
-        WeightType,
-        ScaleType,
-        BiasType,
-        x,
-        x_scale,
-        x_zero_point,
-        w,
-        w_scale,
-        w_zero_point,
-        &output_s8_nhwc,
-        y_scale,
-        y_zero_point,
+    const offsets = cmsis_quant.makeActivationOffsets(InputType, x_zero_point, y_zero_point);
+
+    try runCmsisConvolve(
+        &input_s8.tensor,
+        filter_data,
+        filter_shape,
         bias,
+        multipliers,
+        shifts,
+        offsets,
         stride,
         pads,
         dilations,
-        actual_group,
+        &output_s8_nhwc,
     );
 
     try cmsis_quant.writeS8NhwcOutputToNhwc(InputType, &output_s8_nhwc, output);
 }
 
-/// Validates layout-independent CMSIS bridge requirements and returns the
-/// resolved group count.
-fn validateBridgeInputs(
-    comptime InputType: anytype,
-    comptime WeightType: anytype,
-    x: anytype,
-    w: anytype,
-    output: anytype,
-    group: ?usize,
-    auto_pad: []const u8,
-) !usize {
-    if (comptime !isCmsisActivation(InputType) or !isCmsisWeight(WeightType)) {
-        return error.UnsupportedCmsisQLinearConv;
-    }
-
-    if (auto_pad.len != 0 and !std.mem.eql(u8, auto_pad, "NOTSET")) {
-        return error.UnsupportedCmsisQLinearConv;
-    }
-    if (x.shape.len != 4 or w.shape.len != 4 or output.shape.len != 4) {
-        return error.InvalidDimensions;
-    }
-
-    const actual_group = group orelse 1;
-    if (actual_group != 1) {
-        return error.UnsupportedCmsisQLinearConv;
-    }
-
-    return actual_group;
-}
-
-/// Runs the shared CMSIS-NN convolution path after inputs and outputs have been
-/// normalized to CMSIS's NHWC activation layout.
-fn qlinearconvCmsisNhwcCore(
-    comptime InputType: anytype,
-    comptime WeightType: anytype,
-    comptime ScaleType: anytype,
-    comptime BiasType: anytype,
-    input_nhwc: *const Tensor(InputType),
-    x_scale: *const Tensor(ScaleType),
-    x_zero_point: anytype,
-    w: *const Tensor(WeightType),
-    w_scale: *const Tensor(ScaleType),
-    w_zero_point: anytype,
-    output_s8_nhwc: *Tensor(i8),
-    y_scale: *const Tensor(ScaleType),
-    y_zero_point: anytype,
-    bias: ?*const Tensor(BiasType),
+/// Runs the shared CMSIS-NN convolution call once all buffers are prepared.
+///
+/// This is the single place the CMSIS kernel is invoked. It builds the
+/// params/dims records, sizes the scratch buffer, and calls
+/// `arm_convolve_wrapper_s8`. `filter_data` / `bias_data` / `multipliers` /
+/// `shifts` may be flash-resident `const` slices, hence the `@constCast`s.
+fn runCmsisConvolve(
+    input_s8: *const Tensor(i8),
+    filter_data: []const i8,
+    filter_shape: [4]usize,
+    bias_data: []const i32,
+    multipliers: []const i32,
+    shifts: []const i32,
+    offsets: cmsis_quant.ActivationOffsets,
     stride: ?[]const usize,
     pads: ?[]const usize,
     dilations: ?[]const usize,
-    actual_group: usize,
+    output_s8_nhwc: *Tensor(i8),
 ) !void {
-    if (input_nhwc.shape.len != 4 or output_s8_nhwc.shape.len != 4) return error.InvalidShape;
-
-    const out_channels = w.shape[0];
-    if (out_channels != output_s8_nhwc.shape[3]) return error.InvalidDimensions;
+    const out_channels = output_s8_nhwc.shape[3];
 
     var context = c.cmsis_nn_context{
         .buf = null,
         .size = 0,
     };
-
-    var input_s8 = try cmsis_quant.prepareActivationS8(InputType, &pkg_allocator, input_nhwc);
-    defer input_s8.deinit();
-
-    var filters_cmsis_layout = try cmsis_layout.oihwToCmsisFilterLayout(WeightType, &pkg_allocator, w, actual_group);
-    defer filters_cmsis_layout.deinit();
-
-    var filters_s8 = try cmsis_quant.prepareFilterS8(WeightType, &pkg_allocator, &filters_cmsis_layout, w_zero_point, out_channels);
-    defer filters_s8.deinit();
-
-    var bias_i32 = try cmsis_quant.prepareBiasI32(BiasType, &pkg_allocator, bias, out_channels);
-    defer bias_i32.deinit();
-
-    var requant = try cmsis_quant.makePerChannelRequantParams(&pkg_allocator, x_scale, w_scale, y_scale, out_channels);
-    defer requant.deinit();
-
-    const offsets = cmsis_quant.makeActivationOffsets(InputType, x_zero_point, y_zero_point);
 
     const stride_h = readDimPair(stride, 0, 1);
     const stride_w = readDimPair(stride, 1, stride_h);
@@ -251,20 +203,20 @@ fn qlinearconvCmsisNhwcCore(
         },
     };
     var quant_params = c.cmsis_nn_per_channel_quant_params{
-        .multiplier = requant.multipliers.ptr,
-        .shift = requant.shifts.ptr,
+        .multiplier = @constCast(multipliers.ptr),
+        .shift = @constCast(shifts.ptr),
     };
     var input_dims = dims(
-        input_s8.tensor.shape[0],
-        input_s8.tensor.shape[1],
-        input_s8.tensor.shape[2],
-        input_s8.tensor.shape[3],
+        input_s8.shape[0],
+        input_s8.shape[1],
+        input_s8.shape[2],
+        input_s8.shape[3],
     );
     var filter_dims = dims(
-        filters_cmsis_layout.shape[0],
-        filters_cmsis_layout.shape[1],
-        filters_cmsis_layout.shape[2],
-        filters_cmsis_layout.shape[3],
+        filter_shape[0],
+        filter_shape[1],
+        filter_shape[2],
+        filter_shape[3],
     );
     var bias_dims = dims(1, 1, 1, out_channels);
     var output_dims = dims(
@@ -291,11 +243,11 @@ fn qlinearconvCmsisNhwcCore(
         &conv_params,
         &quant_params,
         &input_dims,
-        input_s8.tensor.data.ptr,
+        input_s8.data.ptr,
         &filter_dims,
-        filters_s8.data.ptr,
+        @constCast(filter_data.ptr),
         &bias_dims,
-        bias_i32.data.ptr,
+        @constCast(bias_data.ptr),
         &output_dims,
         output_s8_nhwc.data.ptr,
     );
@@ -325,11 +277,5 @@ fn readDimPair(value: ?[]const usize, index: usize, default: usize) usize {
 /// Returns whether the activation type can be represented by the current
 /// CMSIS-NN signed `s8` bridge.
 fn isCmsisActivation(comptime T: type) bool {
-    return T == i8 or T == u8;
-}
-
-/// Returns whether the weight type can be packed into the current CMSIS-NN
-/// signed `s8` filter buffer.
-fn isCmsisWeight(comptime T: type) bool {
     return T == i8 or T == u8;
 }

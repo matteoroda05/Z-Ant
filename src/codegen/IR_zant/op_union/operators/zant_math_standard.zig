@@ -462,12 +462,14 @@ pub const qlinear_conv = op_qlinear_conv.qlinear_conv;
 pub const qlinear_conv_lean = op_qlinear_conv.qlinear_conv_lean;
 pub const qlinear_conv_embedded_lean = op_qlinear_conv_utils.qlinearconv_embedded_lean;
 pub const qlinear_conv_dispatch = op_qlinear_conv_utils.qlinearconv_dispatch;
+pub const qlinear_conv_dispatch_cmsis_prepared = op_qlinear_conv_utils.qlinearconv_dispatch_cmsis_prepared;
 pub const get_qlinear_conv_output_shape = op_qlinear_conv_utils.get_qlinearconv_output_shape;
 // backward compat
 pub const qlinearconv = op_qlinear_conv.qlinear_conv;
 pub const qlinearconv_lean = op_qlinear_conv.qlinear_conv_lean;
 pub const qlinearconv_embedded_lean = op_qlinear_conv_utils.qlinearconv_embedded_lean;
 pub const qlinearconv_dispatch = op_qlinear_conv_utils.qlinearconv_dispatch;
+pub const qlinearconv_dispatch_cmsis_prepared = op_qlinear_conv_utils.qlinearconv_dispatch_cmsis_prepared;
 pub const get_qlinearconv_output_shape = op_qlinear_conv_utils.get_qlinearconv_output_shape;
 
 //---qlinear_add

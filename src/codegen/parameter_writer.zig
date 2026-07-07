@@ -5,6 +5,7 @@ const IR = @import("IR_zant");
 // --- zant IR
 const GraphZant = IR.GraphZant;
 const TensorZant = IR.TensorZant;
+const NodeZant = IR.NodeZant;
 // --- utils
 pub const utils = @import("utils.zig");
 // --- onnx
@@ -14,7 +15,7 @@ const allocator = @import("codegen").pkg_allocator.allocator;
 // --- codegen
 const codegenParameters = @import("parameters/parameters.zig");
 
-pub fn write(generated_path: []const u8) !void {
+pub fn write(generated_path: []const u8, linearizedGraph: []const *NodeZant) !void {
 
     //initializing writer for static_parameters file
     const params_file_path = try std.fmt.allocPrint(allocator, "{s}static_parameters.zig", .{generated_path});
@@ -31,7 +32,7 @@ pub fn write(generated_path: []const u8) !void {
     const writer = &param_writer.interface;
 
     // Generate tensor initialization code in the static_parameters.zig file
-    try codegenParameters.write_parameters(writer);
+    try codegenParameters.write_parameters(writer, linearizedGraph);
 
     try writer.flush();
 }

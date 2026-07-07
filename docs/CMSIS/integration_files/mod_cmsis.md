@@ -13,11 +13,28 @@ The module currently exposes:
 ```zig
 pub const layout = @import("layout.zig");
 pub const quant = @import("quant.zig");
+pub const prepare = @import("prepare.zig");
 ```
 
-Why this matters: callers can use `IR_zant.cmsis.layout` and
-`IR_zant.cmsis.quant` as the shared CMSIS helper surface instead of importing
-individual files from operator-specific folders.
+Why this matters: callers can use `IR_zant.cmsis.layout`,
+`IR_zant.cmsis.quant`, and `IR_zant.cmsis.prepare` as the shared CMSIS helper
+surface instead of importing individual files from operator-specific folders.
+
+## `isCmsisSupported`
+
+```zig
+pub fn isCmsisSupported(node: anytype) bool
+```
+
+The single gate the code generator consults to decide whether a node can be
+accelerated by CMSIS-NN today. It dispatches on the operator type and delegates
+per-node eligibility to the operator-specific checker in `prepare.zig`
+(`.qlinearconv => prepare.qlinearconv_isSupported(...)`, else `false`). Only
+QLinearConv can currently return `true`. `node` is taken as `anytype` so this
+file does not import the node/op-union modules that would form an import cycle.
+
+See `prepare.md` for how the generator uses this gate to precompute and emit the
+`cmsis_` constants and to drop the replaced originals.
 
 ## Current Decision
 

@@ -16,8 +16,8 @@ files documented in this directory, including:
 
 These files connect the CMSIS helper layer to the broader project. They carry
 CMSIS decisions into build options, expose the CMSIS package through `IR_zant`,
-wire runtime artifacts for CMSIS C linkage, and make QLinearConv dispatch able
-to try the CMSIS bridge.
+wire runtime artifacts for CMSIS C linkage, and route preparable QLinearConv
+nodes to the codegen-prepared CMSIS bridge.
 
 ## `zantBuild/zantOptions.zig`
 
@@ -142,21 +142,61 @@ Why this matters: the shared layout and quantization helpers are part of
 
 ## `src/codegen/IR_zant/op_union/operators/op_qlinearconv/utils_qlinearconv.zig`
 
-Changes `qlinearconv_dispatch()` from always calling the embedded fallback to
-first trying CMSIS when the CMSIS gate is active:
+`qlinearconv_dispatch()` is now **embedded-only**: it always calls
+`qlinearconv_embedded_lean()`. The previous runtime CMSIS branch (which tried the
+on-the-fly `qlinearconvNchwBridge`, falling back to embedded on
+`error.UnsupportedCmsisQLinearConv` unless CMSIS was forced) was removed together
+with the on-the-fly bridge itself.
 
-```zig
-if (comptime IR_zant.cmsis.cmsisUsed()) {
-    const cmsis_qlinearconv = @import("cmsis_qlinearconv.zig");
-    cmsis_qlinearconv.qlinearconvNchwBridge(...);
-}
-```
+Why this matters: CMSIS acceleration is now decided entirely at code-generation
+time. A preparable node has `write_op` emit `qlinear_conv_dispatch_cmsis_prepared`
+(the codegen-prepared path); any node that reaches the generic
+`qlinearconv_dispatch` is one the generator did **not** prepare, and the removed
+runtime bridge would have rejected it anyway (e.g. `group != 1`) — so there is
+nothing left for this dispatcher to try at runtime. It stays the single backend
+decision point for non-preparable nodes without importing `build_options`.
 
-If the CMSIS bridge returns `error.UnsupportedCmsisQLinearConv`, dispatch falls
-back to `qlinearconv_embedded_lean()` unless `IR_zant.cmsis.cmsisForced(...)` is
-true.
+## Code-generation-time CMSIS preparation
 
-Why this matters: `qlinearconv_dispatch()` remains the single backend decision
-point without directly importing `build_options`. Normal builds keep the
-existing embedded implementation. CMSIS builds can try the CMSIS bridge without
-changing the generator-facing QLinearConv interface.
+These changes move QLinearConv's static CMSIS work (filter OHWI reorder + `i8`
+pack, bias→`i32`, per-channel requant) from every runtime call into lib-gen, and
+make the runtime CMSIS path layout-only. See `prepare.md` and
+`cmsis_qlinearconv.md` for the details; the supporting wiring is:
+
+- **`src/codegen/IR_zant/cmsis/mod_cmsis.zig`** — exports `pub const prepare` and
+  adds `isCmsisSupported(node: anytype) bool`, the single op-type gate the
+  generator consults (delegates the qlinearconv case to `prepare.qlinearconv_isSupported`).
+- **`src/codegen/IR_zant/cmsis/prepare.zig`** (new) — host-safe codegen-time
+  preparation; see `prepare.md`.
+- **`src/codegen.zig` + `src/codegen/parameter_writer.zig`** — thread the
+  linearized node list into the parameters writer
+  (`ParametersWriter.write(generated_path, linearizedGraph.items)` →
+  `write_parameters(writer, linearizedGraph)`). The parameters phase previously
+  saw only a flat tensor map; it needs whole nodes to prepare per-conv constants,
+  and it runs before the predict file where `static_parameters.zig` is closed.
+- **`src/codegen/parameters/parameters.zig`** — on CMSIS builds:
+  `buildExcludedInitializers` collects the prepared nodes' original filter/bias
+  names (minus anything a non-prepared node references) and `write_initilizers`
+  skips them (drop-originals, no flash duplication); `write_cmsis_prepared`
+  emits the five `cmsis_` constants per prepared node (deduped by symbol name)
+  into `static_parameters.zig`.
+- **`op_qlinearconv/op_qlinearconv.zig`** (`write_op`) — when
+  `cmsisUsed() and qlinearconv_isSupported(&self)`, emits
+  `tensMath.qlinear_conv_dispatch_cmsis_prepared(...)` referencing the `cmsis_`
+  constants (and no original weight/scale/bias); otherwise the standard call.
+  `getMathErrorReturn()` is invoked in exactly one branch.
+- **`op_qlinearconv/utils_qlinearconv.zig`** — adds
+  `qlinearconv_dispatch_cmsis_prepared(...)`, a slim dispatcher (input +
+  zero-points + the prepared slices) that calls `qlinearconvNchw(...)` with no
+  embedded fallback.
+- **`op_qlinearconv/cmsis_qlinearconv.zig`** — reduced to two prepared,
+  layout-only public bridges (`qlinearconvNchw` / `qlinearconvNhwc`) over a single
+  private CMSIS kernel call (`runCmsisConvolve`); the on-the-fly runtime bridges
+  and their filter/bias/requant conversion calls were removed (see
+  `cmsis_qlinearconv.md`).
+- **`op_union/operators/zant_math_standard.zig`** — exports
+  `qlinear_conv_dispatch_cmsis_prepared` (and the `qlinearconv_` alias).
+
+Why this matters: preparable QLinearConv nodes stop recomputing static data on
+every inference and no longer store their filter twice in flash, while
+non-preparable nodes and non-CMSIS builds are unchanged.
