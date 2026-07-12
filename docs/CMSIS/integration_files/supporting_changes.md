@@ -11,6 +11,9 @@ files documented in this directory, including:
 - `src/codegen/IR_zant/op_union/operators/op_qlinearconv/cmsis_qlinearconv.zig`
 - `src/utils/utils.zig`
 - `zantBuild/cmsis_build.zig`
+- `scripts/fetch_cmsis_nn.sh`
+- `scripts/fetch_cmsis_5.sh`
+- `scripts/fetch_cmsis_dsp.sh`
 
 ## Purpose
 
@@ -18,6 +21,8 @@ These files connect the CMSIS helper layer to the broader project. They carry
 CMSIS decisions into build options, expose the CMSIS package through `IR_zant`,
 wire runtime artifacts for CMSIS C linkage, and route preparable QLinearConv
 nodes to the codegen-prepared CMSIS bridge.
+
+The vendor acquisition scripts are documented together in `scripts.md`.
 
 ## `zantBuild/zantOptions.zig`
 

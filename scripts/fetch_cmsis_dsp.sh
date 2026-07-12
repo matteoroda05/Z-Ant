@@ -37,9 +37,14 @@ if [ -n "${ARCHIVE}" ]; then
     exit 0
 fi
 
+if [ -n "${CMSIS_DSP_REF:-}" ]; then
+    candidates=("${REF}")
+else
+    candidates=(develop main master)
+fi
+
 if [ -d "${DEST}/.git" ]; then
     echo "Updating CMSIS-DSP in ${DEST}"
-    candidates=("${REF}" develop main master)
     fetched=0
     for r in "${candidates[@]}"; do
         if git -C "${DEST}" -c http.https://github.com/.extraheader= fetch --depth 1 origin "$r"; then
@@ -55,7 +60,6 @@ if [ -d "${DEST}/.git" ]; then
 else
     mkdir -p "${REPO_ROOT}/third_party"
     echo "Cloning CMSIS-DSP (${REF}) into ${DEST}"
-    candidates=("${REF}" develop main master)
     cloned=0
     for r in "${candidates[@]}"; do
         if git -c http.https://github.com/.extraheader= clone --depth 1 --branch "$r" "${REPO_URL}" "${DEST}"; then
@@ -70,5 +74,4 @@ else
 fi
 
 echo "CMSIS-DSP is ready under ${DEST}"
-
 
