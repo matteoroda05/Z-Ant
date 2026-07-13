@@ -1,5 +1,10 @@
 # CMSIS-NN Compiler Options and Integration Formalisms in Z-Ant
 
+> **Historical research snapshot:** this report preserves its original source
+> analysis and does not describe the current build layer. See
+> [sota-jul-13th.md](sota-jul-13th.md) and the
+> [Arm GNU Toolchain guide](../toolchains/arm-gnu-toolchain.md) for current use.
+
 ## Scope and source basis
 
 This report is grounded in the `feat/CMSIS-integration` branch of `ZantFoundation/Z-Ant`, with direct inspection of the current build system, CMSIS dispatch module, the `QLinearConv` operator implementation, the CMSIS wrapper, the quantization utilities, and the project’s own CMSIS integration guide. For the CMSIS side, it also uses Arm’s official CMSIS-NN repository and the generated API documentation on `arm-software.github.io`, especially the convolution wrapper documentation, buffer-size logic, compiler header, and the official build guidance. fileciteturn52file0L3-L3 fileciteturn51file0L3-L3 fileciteturn53file0L3-L3 fileciteturn54file0L3-L3 fileciteturn55file0L3-L3 fileciteturn56file0L3-L3 fileciteturn57file0L3-L3 fileciteturn27file0L3-L3 fileciteturn28file0L3-L3 citeturn10view0turn12view0turn13view0turn14view2

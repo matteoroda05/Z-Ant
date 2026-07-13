@@ -1,13 +1,13 @@
 const std = @import("std");
+const ArmBuildConfig = @import("arm_toolchain.zig").ArmBuildConfig;
 
 pub const Cmsis_flags = struct {
     enable_cmsis: bool,
     target_is_cortex_m: bool,
 
-    pub fn init(b: *std.Build) !Cmsis_flags {
+    pub fn init(b: *std.Build, arm_build: ArmBuildConfig) !Cmsis_flags {
         const enable_cmsis = b.option(bool, "enable_CMSIS", "Enable CMSIS-NN backend support") orelse false;
-        const cpu = readCpuOption(b);
-        const target_is_cortex_m = cpuIsCortexM(cpu);
+        const target_is_cortex_m = if (arm_build.profile != null) true else cpuIsCortexM(arm_build.legacy_cpu_hint);
 
         return Cmsis_flags{
             .enable_cmsis = enable_cmsis,
@@ -15,14 +15,6 @@ pub const Cmsis_flags = struct {
         };
     }
 };
-
-fn readCpuOption(b: *std.Build) []const u8 {
-    const option = b.user_input_options.get("cpu") orelse return "";
-    return switch (option.value) {
-        .scalar => |cpu| cpu,
-        else => "",
-    };
-}
 
 fn cpuIsCortexM(cpu: []const u8) bool {
     return startsWithIgnoreCase(cpu, "cortex_m") or

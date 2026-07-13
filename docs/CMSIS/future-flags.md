@@ -1,5 +1,10 @@
 # CMSIS-NN — Future Flags & Build Knobs
 
+> **Future options:** these flags are not part of the current public Arm build
+> interface. See [sota-jul-13th.md](sota-jul-13th.md) for current work and the
+> [Arm GNU Toolchain guide](../toolchains/arm-gnu-toolchain.md) for supported
+> options.
+
 Post-parity tuning options for the CMSIS-NN QLinearConv backend. **None are
 required for Cortex-M4/M7 correctness today.** They matter once the vendor sources
 are in place and you move to newer chips, chase speed, or need bit-exact output.

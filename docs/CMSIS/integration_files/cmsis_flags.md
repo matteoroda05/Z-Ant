@@ -3,26 +3,30 @@
 ## Role
 
 `zantBuild/cmsis_flags.zig` is the build-system entry point for CMSIS-NN
-selection flags. It reads the user-facing Zig build options and stores the
-result in `Cmsis_flags`.
+selection flags. It reads `-Denable_CMSIS` and derives CMSIS target state from
+the shared Arm build configuration.
 
 ## Exported State
 
 `Cmsis_flags` currently stores:
 
 - `enable_cmsis`: set by `-Denable_CMSIS=true`.
-- `target_is_cortex_m`: derived from the `-Dcpu` string.
+- `target_is_cortex_m`: true for an explicit Arm profile; otherwise derived
+  from the legacy `-Dcpu` hint.
 
 ## CPU Detection
 
-This file reads the raw `-Dcpu` value from Zig's parsed user input:
+`-Dcpu` is parsed once by `ArmBuildConfig` in `zantBuild/arm_toolchain.zig`.
+`Cmsis_flags.init()` receives that configuration:
 
 ```zig
-const cpu = readCpuOption(b);
+pub fn init(b: *std.Build, arm_build: ArmBuildConfig) !Cmsis_flags
 ```
 
-`cpuIsCortexM(cpu)` returns true only when the CPU string starts with one of
-these prefixes, case-insensitively:
+When `arm_build.profile` is set, `target_is_cortex_m` is true because the
+profile is an explicit Cortex-M selection. Without a profile,
+`cpuIsCortexM(arm_build.legacy_cpu_hint)` preserves the old CPU-prefix check.
+It matches these prefixes case-insensitively:
 
 - `cortex_m`
 - `cortex-m`
@@ -43,31 +47,14 @@ Examples that do not match:
 
 ### Why The Detection Is Conservative
 
-The detection only trusts explicit Cortex-M-looking CPU names. If the user does
-not pass `-Dcpu`, `target_is_cortex_m` remains false.
+The detection only trusts an explicit profile or an explicit Cortex-M-looking
+legacy CPU name. If neither is supplied, `target_is_cortex_m` remains false.
 
 This prevents `-Denable_CMSIS=true` from enabling CMSIS on unknown, host, or
-non-Cortex-M builds. `-Dcpu=cortex_m*` is valid for host (native-target) builds
-too: `build.zig` only feeds `-Dcpu` into the native target-query resolution
-when cross-compiling, so this file's independent read of `-Dcpu` (via
-`b.user_input_options`) still activates the gate without corrupting the host
-target.
-
-### Future Target Detection
-
-This file already computes `target_is_cortex_m` from `-Dcpu`. In the future,
-that check could use Zig target/CPU metadata instead, while still exporting the
-same boolean:
-
-```zig
-build_options.target_is_cortex_m
-```
-
-So `mod_cmsis.zig` can keep using:
-
-```zig
-enable_cmsis and target_is_cortex_m
-```
+non-Cortex-M builds. `-Dcpu=cortex_m*` is still valid for host
+(native-target) builds: the shared configuration retains it as
+`legacy_cpu_hint`, so CMSIS code generation can use the existing gate without
+changing the host target.
 
 The actual decision to use CMSIS is made in `mod_cmsis.zig`; this file only
-collects and derives the build flags.
+collects `enable_cmsis` and derives `target_is_cortex_m`.

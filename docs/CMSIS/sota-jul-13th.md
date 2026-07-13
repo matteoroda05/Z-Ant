@@ -32,9 +32,15 @@ build blocker.
   matmul files now use `Source/ConvolutionFunctions`; obsolete v7 source names
   were removed. Every currently registered C-source path exists.
 - **The architecture gate is real.** `cmsis_flags.zig` derives
-  `target_is_cortex_m` from `-Dcpu`, and CMSIS is used only when
-  `enable_cmsis and target_is_cortex_m`. Native `lib-gen` accepts
-  `-Dcpu=cortex_m*` without parsing it as the host CPU target.
+  `target_is_cortex_m` from a selected Arm profile or, when no profile is
+  selected, from the legacy `-Dcpu` Cortex-M hint. CMSIS is used only when
+  `enable_cmsis and target_is_cortex_m`.
+- **The Arm build layer is available.** It provides public Cortex-M7 and
+  Cortex-M4 profiles plus managed and external complete Arm GNU Toolchain
+  providers. Managed mode is pinned to 15.2.Rel1. The build resolves and checks
+  the selected newlib headers and libraries. CMSIS modules and C sources now
+  receive the resolved GCC and newlib system include paths; the runtime
+  archives are not bundled into Z-Ant's static library.
 - **Codegen-time preparation works.** `IR_zant/cmsis/prepare.zig` precomputes the
   OHWI `i8` filter, `i32` bias, and per-channel multiplier/shift arrays and emits
   them into `static_parameters.zig`. Replaced filter/bias initializers are not
@@ -46,28 +52,50 @@ build blocker.
 - **Supported surface:** standard convolution with `group == 1`, `i8`/`u8`
   activations and weights, `auto_pad` NOTSET/empty, and initializer
   weights/scales. Other cases use the embedded path.
-- **Current validation:** `zig build test` passes, CMSIS `lib-gen` for `beer`
-  succeeds, and the Cortex-M7 library build now reaches vendor C compilation.
+- **Current validation:** `zig build test` passes with 258 tests. The optional
+  host CMSIS build also passes all 258 tests after completing the curated source
+  list. The seven Arm profile and provider-option tests pass, including missing
+  and invalid toolchain-path errors. A real managed Cortex-M7 or Cortex-M4
+  compiler/multilib resolution has not yet been validated on this checkout.
 
-## Current build blocker
+## Current validation boundary
 
-### Freestanding C standard-library headers
+### Host CMSIS source-list validation passes
 
-The current Cortex-M7 command is:
+The following command compiles and links the curated CMSIS-NN source set and
+passes all 258 tests:
 
 ```bash
-zig build lib -Dmodel=beer -Dtarget=thumb-freestanding \
-  -Dcpu=cortex_m7 -Denable_CMSIS=true
+zig build test -Denable_CMSIS=true -Dcpu=cortex_m7
 ```
 
-Compilation stops because the freestanding environment cannot find
-`string.h`, which is included by CMSIS-NN and CMSIS-DSP headers. No compatible
-Arm newlib/toolchain include directory is currently discoverable on the host.
+The source list now includes
+`arm_nn_mat_mult_kernel_row_offset_s8_s16.c`, which supplies the transitive
+implementation used by `arm_convolve_s8.c`.
 
-The next integration step is to provide a configurable or automatically
-discovered Arm newlib include/runtime path. Once those headers are available,
-the cross-build must be rerun to identify any remaining missing C sources or
-link symbols.
+### Managed Cortex-M cross-build has not been run yet
+
+The preferred Cortex-M7 command is:
+
+```bash
+zig build lib -Dmodel=beer \
+  -Darm_profile=cortex_m7_fpv5_d16_softfp \
+  -Denable_CMSIS=true
+```
+
+The Arm toolchain resolver locates and validates the profile-compatible GCC
+include directory, newlib include directory, `libc.a`, `libm.a`, and `libgcc`.
+`cmsis_build.zig` now receives that configuration and adds the GCC/newlib
+directories as system include paths. The managed toolchain is not installed in
+this checkout, so the Cortex-M7 build has not yet confirmed that CMSIS compiles
+past `string.h` or exposed the next compiler error.
+
+The next step is to install the pinned managed toolchain and run the Cortex-M7
+cross-build, then repeat with the Cortex-M4 profile. The resolved `libc.a`,
+`libm.a`, and `libgcc` archives remain reserved for a later final-executable or
+firmware-link decision. See the
+[Arm GNU Toolchain guide](../toolchains/arm-gnu-toolchain.md) and the detailed
+[Arm build layer notes](integration_files/arm_build_layer.md).
 
 ## Remaining acceleration work
 
@@ -104,10 +132,13 @@ handling of `OPTIONAL_RESTRICT_KEYWORD`.
 
 ## Priority order
 
-1. Provide the freestanding C-library/newlib headers and runtime support.
-2. Complete and validate the Cortex-M library build, reconciling any remaining
-   v7 source or linker dependencies.
-3. Add depthwise QLinearConv acceleration.
-4. Validate numeric correctness and performance on Cortex-M hardware or QEMU.
-5. Add generic grouped convolution support.
-6. Wire NHWC-native generation and optional optimization controls as needed.
+1. Install the managed 15.2.Rel1 toolchain and validate the Cortex-M7 profile,
+   header paths, and multilib resolution.
+2. Repeat the static-library cross-build with the Cortex-M4 profile and fix any
+   remaining header or C-source errors.
+3. Decide and implement final-executable linking with the resolved runtime
+   archives when that validation artifact is introduced.
+4. Add depthwise QLinearConv acceleration.
+5. Validate numeric correctness and performance on Cortex-M hardware or QEMU.
+6. Add generic grouped convolution support.
+7. Wire NHWC-native generation and optional optimization controls as needed.

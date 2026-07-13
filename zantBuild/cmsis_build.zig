@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const ArmBuildConfig = @import("arm_toolchain.zig").ArmBuildConfig;
 const CmsisFlags = @import("cmsis_flags.zig").Cmsis_flags;
 
 /// Header search paths needed by Zig `@cImport` and C compilation when the
@@ -26,7 +27,7 @@ const c_flags = [_][]const u8{
     "-fno-math-errno",
 };
 
-/// Minimal source set needed by the current QLinearConv CMSIS-NN vertical slice.
+/// Curated source set currently used by the QLinearConv CMSIS-NN vertical slice.
 ///
 /// The list is intentionally centralized here so operator code does not need
 /// to know how CMSIS-NN's C implementation is assembled into build artifacts.
@@ -43,6 +44,7 @@ const c_sources = [_][]const u8{
     "third_party/CMSIS-NN/Source/ConvolutionFunctions/arm_depthwise_conv_s8_opt.c",
     "third_party/CMSIS-NN/Source/ConvolutionFunctions/arm_depthwise_conv_get_buffer_sizes_s8.c",
     "third_party/CMSIS-NN/Source/ConvolutionFunctions/arm_nn_mat_mult_kernel_s8_s16.c",
+    "third_party/CMSIS-NN/Source/ConvolutionFunctions/arm_nn_mat_mult_kernel_row_offset_s8_s16.c",
     "third_party/CMSIS-NN/Source/ConvolutionFunctions/arm_nn_mat_mult_s8.c",
     "third_party/CMSIS-NN/Source/NNSupportFunctions/arm_nn_mat_mult_nt_t_s8.c",
     "third_party/CMSIS-NN/Source/NNSupportFunctions/arm_nn_vec_mat_mult_t_s8.c",
@@ -51,15 +53,27 @@ const c_sources = [_][]const u8{
     "third_party/CMSIS-DSP/Source/BasicMathFunctions/arm_dot_prod_f32.c",
 };
 
-/// Adds CMSIS include paths to a Zig module when the CMSIS backend is selected.
+/// Adds CMSIS and resolved Arm toolchain include paths to a Zig module when the
+/// CMSIS backend is selected.
 ///
 /// This is what allows files under `IR_zant` to use `@cImport` for CMSIS
-/// headers without adding those include paths to non-CMSIS builds.
-pub fn configureCmsisModuleIncludes(b: *std.Build, module: *std.Build.Module, flags: CmsisFlags) void {
+/// headers and lets vendored CMSIS C sources use the selected toolchain's GCC
+/// and newlib headers without affecting non-CMSIS builds.
+pub fn configureCmsisModuleIncludes(
+    b: *std.Build,
+    module: *std.Build.Module,
+    flags: CmsisFlags,
+    arm_build: ArmBuildConfig,
+) void {
     if (!cmsisRequested(flags)) return;
 
     for (include_paths) |path| {
         module.addIncludePath(b.path(path));
+    }
+
+    if (arm_build.toolchain) |toolchain| {
+        module.addSystemIncludePath(.{ .cwd_relative = toolchain.gcc_include });
+        module.addSystemIncludePath(.{ .cwd_relative = toolchain.newlib_include });
     }
 }
 
@@ -68,11 +82,17 @@ pub fn configureCmsisModuleIncludes(b: *std.Build, module: *std.Build.Module, fl
 ///
 /// This should be applied only to artifacts that may execute CMSIS kernels,
 /// such as generated model libraries, generated model tests, benchmarks, and
-/// relevant IR/runtime tests.
-pub fn configureCmsisRuntimeArtifact(b: *std.Build, artifact: *std.Build.Step.Compile, flags: CmsisFlags) void {
+/// relevant IR/runtime tests. This does not attach the toolchain's libc, libm,
+/// or libgcc archives.
+pub fn configureCmsisRuntimeArtifact(
+    b: *std.Build,
+    artifact: *std.Build.Step.Compile,
+    flags: CmsisFlags,
+    arm_build: ArmBuildConfig,
+) void {
     if (!cmsisRequested(flags)) return;
 
-    configureCmsisModuleIncludes(b, artifact.root_module, flags);
+    configureCmsisModuleIncludes(b, artifact.root_module, flags, arm_build);
     artifact.root_module.addCSourceFiles(.{
         .root = b.path(""),
         .files = &c_sources,

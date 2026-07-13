@@ -81,3 +81,14 @@ does not prove that:
 
 For the current build status and the cross-build command, see
 `cmsis_build.md`.
+
+## Arm GNU Toolchain fetcher
+
+The separate `scripts/fetch_arm_toolchain.py` fetcher installs the complete
+managed `arm-none-eabi` toolchain under `third_party/toolchains/`. It is not run
+automatically by `zig build`; the user runs it explicitly when using the
+managed Cortex-M provider. It supplies newlib and the other target libraries,
+while the CMSIS scripts above supply only the CMSIS vendor sources.
+
+See the [Arm GNU Toolchain guide](../../toolchains/arm-gnu-toolchain.md) for its
+flags, pinned version, external-provider option, and current build boundary.

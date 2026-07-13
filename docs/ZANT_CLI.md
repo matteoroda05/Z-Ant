@@ -149,17 +149,26 @@ These flags can be used with any build command:
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
+| `-Darm_profile` | enum | `null` | Select `cortex_m7_fpv5_d16_softfp` or `cortex_m4_fpv4_sp_d16_softfp` |
+| `-Darm_toolchain` | enum | `managed` with an Arm profile | Select the `managed` or `external` Arm GNU Toolchain provider |
+| `-Darm_toolchain_path` | string | `null` | Absolute external toolchain root; required only with `-Darm_toolchain=external` |
 | `-Dtarget` | string | `"native"` | Target architecture (e.g., "x86_64-linux", "thumb-freestanding") |
 | `-Dcpu` | string | `null` | Target CPU model (e.g., "cortex_m33"). CMSIS auto-detection accepts `cortex_m`, `cortex-m`, and `cortexm` prefixes, case-insensitively. |
 | `-Doptimize` | enum | `Debug` | Optimization mode: Debug, ReleaseFast, ReleaseSafe, ReleaseSmall |
 | `-Dtrace_allocator` | bool | `true` | Enable tracing allocator |
 | `-Dallocator` | string | `"raw_c_allocator"` | Allocator type to use |
-| `-Denable_CMSIS` | bool | `false` | Request CMSIS-NN usage when `-Dcpu` is detected as Cortex-M |
+| `-Denable_CMSIS` | bool | `false` | Request CMSIS-NN usage with an Arm profile or a legacy Cortex-M `-Dcpu` hint |
 
 ### Global Usage Examples
 ```bash
-# Cross-compile for ARM Cortex-M
-zig build lib-gen -Dmodel="my_model" -Dtarget=thumb-freestanding-eabi -Dcpu=cortex_m33
+# Cross-compile with the managed Cortex-M7 profile
+zig build lib -Dmodel="my_model" -Darm_profile=cortex_m7_fpv5_d16_softfp
+
+# Use a complete external Arm GNU Toolchain instead
+zig build lib -Dmodel="my_model" \
+  -Darm_profile=cortex_m7_fpv5_d16_softfp \
+  -Darm_toolchain=external \
+  -Darm_toolchain_path=/absolute/path/to/arm-gnu-toolchain
 
 # Build with optimization
 zig build lib -Dmodel="my_model" -Doptimize=ReleaseFast
@@ -171,6 +180,11 @@ zig build lib -Dtarget=aarch64-macos -Doptimize=ReleaseSafe
 # Request CMSIS-NN usage for a detected Cortex-M CPU (works for host/native builds too)
 zig build lib -Denable_CMSIS=true -Dcpu=cortex_m33
 ```
+
+The managed provider is pinned to Arm GNU Toolchain 15.2.Rel1 and is installed
+explicitly with `./scripts/fetch_arm_toolchain.py`. See the
+[Arm GNU Toolchain guide](toolchains/arm-gnu-toolchain.md) for the fetcher,
+profiles, provider rules, and the current libc integration boundary.
 
 ## Common Workflows
 
@@ -274,9 +288,13 @@ zig build test
 ./zant input_setter --model my_model --shape 1,1,28,28
 ./zant shape_thief --model my_model
 
-# Generate for ARM Cortex-M
-zig build lib-gen -Dmodel=embedded_model -Ddo_export -Dtarget=thumb-freestanding -Dcpu=cortex_m33 [-Dxip]
-zig build lib -Dmodel=embedded_model -Ddo_export -Dtarget=thumb-freestanding -Dcpu=cortex_m33 -Doptimize=ReleaseSmall [-Dxip]
+# Generate code on the host
+zig build lib-gen -Dmodel=embedded_model -Ddo_export [-Dxip]
+
+# Compile the generated library for Cortex-M7
+zig build lib -Dmodel=embedded_model -Ddo_export \
+  -Darm_profile=cortex_m7_fpv5_d16_softfp \
+  -Doptimize=ReleaseSmall [-Dxip]
 
 # Test on native platform first
 zig build lib-test -Dmodel=embedded_model

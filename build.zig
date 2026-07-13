@@ -12,25 +12,16 @@ var optimize: std.builtin.OptimizeMode = undefined;
 pub fn build(b: *std.Build) void {
 
     // First build the Zant enviroment
-    const zantBuild: ZantBuild = ZantBuild.init(b) catch unreachable;
+    const zantBuild = ZantBuild.init(b) catch |err| {
+        std.log.err("could not initialize Z-Ant build configuration: {s}", .{@errorName(err)});
+        std.process.exit(1);
+    };
     // ---------------------------------------------------------------------
     // ------------------ Target and Release Optimization ------------------
     // ---------------------------------------------------------------------
-    // Get target and CPU options from command line or use defaults
-    const target_str = b.option([]const u8, "target", "Target architecture (e.g., thumb-freestanding)") orelse "native";
-    const cpu_str = b.option([]const u8, "cpu", "CPU model (e.g., cortex_m33)");
-    const is_native_target = std.mem.eql(u8, target_str, "native");
-
-    const target_query = std.Target.Query.parse(.{
-        .arch_os_abi = target_str,
-        .cpu_features = if (is_native_target) null else cpu_str,
-    }) catch |err| {
-        std.log.scoped(.build).warn("Error parsing target: {}\n", .{err});
-        return;
-    };
-    target = b.resolveTargetQuery(target_query);
+    target = b.resolveTargetQuery(zantBuild.zantOptions.arm_build.target_query);
     optimize = b.standardOptimizeOption(.{});
-    cmsis_build.configureCmsisModuleIncludes(b, zantBuild.zantModules.IR_zant_mod, zantBuild.zantOptions.cmsis_flags);
+    cmsis_build.configureCmsisModuleIncludes(b, zantBuild.zantModules.IR_zant_mod, zantBuild.zantOptions.cmsis_flags, zantBuild.zantOptions.arm_build);
 
     // ************************************************ UNIT TESTS **************************************************
     // $ zig build test --summary all
@@ -103,7 +94,7 @@ inline fn unit_test_creation(b: *std.Build, zantBuild: ZantBuild) void {
     ir_test_mod.addImport("IR_zant", zantBuild.zantModules.IR_zant_mod);
     ir_test_mod.addOptions("build_options", zantBuild.zantStepOptions.build_step_option);
     const ir_tests = b.addTest(.{ .name = "test_IR_zant", .root_module = ir_test_mod });
-    cmsis_build.configureCmsisRuntimeArtifact(b, ir_tests, zantBuild.zantOptions.cmsis_flags);
+    cmsis_build.configureCmsisRuntimeArtifact(b, ir_tests, zantBuild.zantOptions.cmsis_flags, zantBuild.zantOptions.arm_build);
     ir_tests.linkLibC();
     test_step.dependOn(&b.addRunArtifact(ir_tests).step);
 
@@ -162,7 +153,7 @@ inline fn lib_exe(b: *std.Build, zantBuild: ZantBuild) void {
     // Add necessary imports for the executable.
     lib_model_exe.root_module.addImport("codegen", zantBuild.zantModules.codegen_mod);
     lib_model_exe.root_module.addImport("IR_zant", zantBuild.zantModules.IR_zant_mod);
-    cmsis_build.configureCmsisRuntimeArtifact(b, lib_model_exe, zantBuild.zantOptions.cmsis_flags);
+    cmsis_build.configureCmsisRuntimeArtifact(b, lib_model_exe, zantBuild.zantOptions.cmsis_flags, zantBuild.zantOptions.arm_build);
 
     const model_exe_cmd = b.addRunArtifact(lib_model_exe);
     if (b.args) |args| {
@@ -198,7 +189,7 @@ inline fn lib_test(b: *std.Build, zantBuild: ZantBuild) void {
 
     test_generated_lib.root_module.addImport("IR_zant", zantBuild.zantModules.IR_zant_mod);
     test_generated_lib.root_module.addImport("codegen", zantBuild.zantModules.codegen_mod);
-    cmsis_build.configureCmsisRuntimeArtifact(b, test_generated_lib, zantBuild.zantOptions.cmsis_flags);
+    cmsis_build.configureCmsisRuntimeArtifact(b, test_generated_lib, zantBuild.zantOptions.cmsis_flags, zantBuild.zantOptions.arm_build);
     test_generated_lib.linkLibC();
 
     const run_test_generated_lib = b.addRunArtifact(test_generated_lib);
@@ -224,7 +215,7 @@ inline fn lib_creation(b: *std.Build, zantBuild: ZantBuild) !*std.Build.Step.Com
     static_lib.linkLibC();
     static_lib.root_module.addImport("IR_zant", zantBuild.zantModules.IR_zant_mod);
     static_lib.root_module.addImport("codegen", zantBuild.zantModules.codegen_mod);
-    cmsis_build.configureCmsisRuntimeArtifact(b, static_lib, zantBuild.zantOptions.cmsis_flags);
+    cmsis_build.configureCmsisRuntimeArtifact(b, static_lib, zantBuild.zantOptions.cmsis_flags, zantBuild.zantOptions.arm_build);
 
     const output_path = std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ zantBuild.zantOptions.codegen_flags.model_name_option, @tagName(target.result.os.tag) }) catch |err| {
         std.log.scoped(.build).warn("Error allocating old path: {}\n", .{err});
@@ -308,7 +299,7 @@ inline fn op_codegen_test(b: *std.Build, zantBuild: ZantBuild) void {
     test_all_oneOp.root_module.addImport("IR_zant", zantBuild.zantModules.IR_zant_mod);
     test_all_oneOp.root_module.addImport("codegen", zantBuild.zantModules.codegen_mod); //codegen
     test_all_oneOp.root_module.addOptions("testing_options", zantBuild.zantStepOptions.testing_step_option); //<<--OSS!! it is an option!
-    cmsis_build.configureCmsisRuntimeArtifact(b, test_all_oneOp, zantBuild.zantOptions.cmsis_flags);
+    cmsis_build.configureCmsisRuntimeArtifact(b, test_all_oneOp, zantBuild.zantOptions.cmsis_flags, zantBuild.zantOptions.arm_build);
 
     test_all_oneOp.linkLibC();
 
@@ -382,7 +373,7 @@ inline fn benchmark_create(b: *std.Build, zantBuild: ZantBuild) void {
     benchmark.root_module.addImport("IR_zant", zantBuild.zantModules.IR_zant_mod);
     benchmark.root_module.addImport("codegen", zantBuild.zantModules.codegen_mod); //codegen
     benchmark.root_module.addOptions("bench_options", zantBuild.zantStepOptions.bench_step_option);
-    cmsis_build.configureCmsisRuntimeArtifact(b, benchmark, zantBuild.zantOptions.cmsis_flags);
+    cmsis_build.configureCmsisRuntimeArtifact(b, benchmark, zantBuild.zantOptions.cmsis_flags, zantBuild.zantOptions.arm_build);
     benchmark.linkLibC();
 
     const run_benchmark = b.addRunArtifact(benchmark);

@@ -4,6 +4,10 @@ This document covers CMSIS-NN integration changes outside the dedicated CMSIS
 files documented in this directory, including:
 
 - `zantBuild/cmsis_flags.zig`
+- `zantBuild/arm_profiles.zig`
+- `zantBuild/arm_toolchain.zig`
+- `zantBuild/zantOptions.zig`
+- `build.zig`
 - `src/codegen/IR_zant/cmsis/mod_cmsis.zig`
 - `src/codegen/IR_zant/cmsis/layout.zig`
 - `src/codegen/IR_zant/cmsis/quant.zig`
@@ -26,25 +30,30 @@ The vendor acquisition scripts are documented together in `scripts.md`.
 
 ## `zantBuild/zantOptions.zig`
 
-Adds the CMSIS flag group to the global build option container.
+Initializes the shared Arm build configuration before the CMSIS flag group.
 
 Relevant change:
 
 ```zig
-const cmsis = @import("cmsis_flags.zig");
+const arm_toolchain = @import("arm_toolchain.zig");
 
+arm_build: arm_toolchain.ArmBuildConfig,
 cmsis_flags: cmsis.Cmsis_flags,
 ```
 
-and initializes it with:
+The initialization order is:
 
 ```zig
-.cmsis_flags = try cmsis.Cmsis_flags.init(b),
+const arm_build = try arm_toolchain.ArmBuildConfig.init(b);
+
+.arm_build = arm_build,
+.cmsis_flags = try cmsis.Cmsis_flags.init(b, arm_build),
 ```
 
-Why this matters: `cmsis_flags.zig` reads the CMSIS-related build flags, but
-those values need to be carried through `ZantOptions` before other build
-helpers can export them to Zig modules.
+Why this matters: profile, provider, toolchain, target, and legacy CPU parsing
+now happen once in `ArmBuildConfig`. CMSIS receives the resulting configuration
+instead of independently reading `-Dcpu`. See `arm_build_layer.md` for the
+complete option and toolchain flow.
 
 ## `zantBuild/zantStepOptions.zig`
 
@@ -95,7 +104,21 @@ Imports the CMSIS build helper:
 const cmsis_build = @import("zantBuild/cmsis_build.zig");
 ```
 
-Adds CMSIS include paths to `IR_zant_mod` after target/optimization resolution:
+Uses the target query prepared by `ArmBuildConfig`:
+
+```zig
+target = b.resolveTargetQuery(zantBuild.zantOptions.arm_build.target_query);
+```
+
+This replaces direct target/CPU parsing in `build.zig`. Without an Arm profile,
+the shared configuration produces the same legacy query. With a profile, it
+uses the exact profile target and CPU features.
+
+Build configuration failures are logged and terminate the build instead of
+using `catch unreachable`.
+
+`build.zig` still adds CMSIS include paths to `IR_zant_mod` after target and
+optimization resolution:
 
 ```zig
 cmsis_build.configureCmsisModuleIncludes(

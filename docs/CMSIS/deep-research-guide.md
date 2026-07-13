@@ -1,5 +1,10 @@
 # CMSIS-NN Integration Plan for Z-Ant Feature Branch
 
+> **Historical research snapshot:** this document records the earlier branch
+> analysis and is not the current integration guide. See
+> [sota-jul-13th.md](sota-jul-13th.md) and
+> [integration_files/](integration_files/) for the implemented state.
+
 ## What the earlier CMSIS integration actually did
 
 The older `feat/CMSIS-integration` branch implemented CMSIS-NN as a build-time optional backend. It introduced a dedicated `cmsis_flags.zig` file, added a boolean `enable_cmsis` field into `ZantOptions`, and exported that flag through `build_options` so runtime Zig code could make a compile-time dispatch decision. In the same branch, the build system conditionally linked CMSIS support into many artifacts through helper functions such as `configureCmsisModuleIncludes()` and `configureCmsisSupport()`. fileciteturn56file0L3-L3 fileciteturn46file0L3-L3 fileciteturn47file0L3-L3 fileciteturn14file0L3-L3 fileciteturn51file0L3-L3
