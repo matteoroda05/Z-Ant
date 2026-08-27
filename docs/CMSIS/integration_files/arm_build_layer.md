@@ -24,7 +24,7 @@ For user-facing installation and provider instructions, see the
 | Option | Meaning |
 |---|---|
 | `-Darm_profile=<profile>` | Activates an Arm profile. |
-| `-Darm_toolchain=managed|external` | Chooses the toolchain provider after a profile is selected. The default is `managed`. |
+| `-Darm_toolchain=managed/external` | Chooses the toolchain provider after a profile is selected. The default is `managed`. |
 | `-Darm_toolchain_path=<absolute-path>` | Supplies the root of an external toolchain. It is required only with `-Darm_toolchain=external`. |
 
 `arm_toolchain` and `arm_toolchain_path` are invalid without `arm_profile`.
@@ -128,8 +128,9 @@ directory, `libc.a`, `libm.a`, and `libgcc` paths remain build-only data in
 include directories as system include paths when CMSIS and an Arm profile are
 selected.
 
-Therefore this layer makes a Cortex-M toolchain selectable and verifiable, but
-the real CMSIS Cortex-M cross-build still needs validation with an installed
-toolchain. The resolved `libc.a`, `libm.a`, and `libgcc` paths are not attached
-or bundled; final executable and firmware linking remain separate follow-up
-work.
+The CMSIS-enabled `beer` static library now cross-builds successfully with both
+the Cortex-M4 and Cortex-M7 profiles. This validates profile selection,
+toolchain discovery, newlib/GCC header plumbing, and the registered CMSIS C
+source set. The resolved `libc.a`, `libm.a`, and `libgcc` paths are still not
+attached or bundled; final executable linking, firmware integration, flashing,
+and on-device inference remain separate follow-up work.

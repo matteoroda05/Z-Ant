@@ -2,76 +2,78 @@
 
 ## Role
 
-`prepare.zig` performs the **code-generation-time** CMSIS-NN preparation for
-QLinearConv. It computes the static constants a prepared node needs — the OHWI
-`i8` filter, the `i32` bias, and the per-channel requant multiplier/shift arrays
-— so the runtime CMSIS path no longer recomputes them on every inference.
+`prepare.zig` owns QLinearConv's CMSIS classification and code-generation-time
+preparation. It is host-safe and never imports CMSIS C headers, allowing model
+generation to prepare filters, biases, and requant arrays on a normal host.
 
-It is **host-safe**: it never imports the CMSIS vendor headers
-(`@cImport("arm_nnfunctions.h")`), so it runs inside the lib-gen tool on a normal
-host where no CMSIS sources exist. It reuses the existing numeric primitives in
-`layout.zig` and `quant.zig`, so the constants it emits are byte-identical to
-what the on-the-fly runtime bridge would compute.
+## Classification
 
-For now this file holds only `qlinearconv_*` functions. When a second operator
-gains CMSIS support it adds its own `<op>_*` functions here.
+```zig
+pub const CmsisKind = enum { none, standard, depthwise };
+pub fn qlinearconv_classify(op: *const QLinearConv) CmsisKind
+```
 
-## Public API
+This is the single QLinearConv CMSIS classification source used by parameter
+generation and `QLinearConv.write_op(...)`.
 
-- `qlinearconv_isSupported(op: *const QLinearConv) bool` — the single per-node
-  eligibility gate. Returns `true` only for a QLinearConv node the current
-  CMSIS-NN integration can handle: `i8`/`u8` activations & weights, `auto_pad`
-  NOTSET/empty, `group == 1`, a rank-4 initializer weight with non-zero dims,
-  three valid `f32` scale initializers (with `y_scale[0] != 0`), a supported
-  `w_zero_point` type, and — if present — an `i32` bias initializer of length 1
-  or `>= out_channels`. When CMSIS gains wider support (e.g. `group > 1`), relax
-  the checks here.
-- `Prepared` — owns the precomputed `filter_s8`, `filter_shape` (`[4]usize`),
-  `bias_i32`, `multipliers`, and `shifts`. Caller frees it with `deinit`.
-- `qlinearconv_prepare(alloc, op) !Prepared` — dispatches on the weight type and
-  builds the constants by reusing `oihwToCmsisFilterLayout` → `prepareFilterS8`
-  → `prepareBiasI32` → `makePerChannelRequantParams`.
+Common accepted properties include `i8`/`u8` activations and weights, matching
+input/output activation types, NOTSET/empty `auto_pad`, initializer weights and
+scales, supported weight zero-points, and a valid optional `i32` bias.
 
-## Consumers
+Classification then applies this precedence:
 
-- **`isCmsisSupported`** (in `mod_cmsis.zig`) dispatches on the operator type and
-  delegates the qlinearconv case to `qlinearconv_isSupported`.
-- **`parameters.zig`** (`write_cmsis_prepared`) calls `qlinearconv_prepare` and
-  emits the results into `static_parameters.zig` as `cmsis_`-prefixed constants.
-- **`op_qlinearconv.zig`** (`write_op`) calls `qlinearconv_isSupported` to decide
-  whether to emit the prepared dispatch call.
+- `.standard` when `group == 1`, preserving the existing standard-convolution
+  path, including the one-input-channel degenerate depthwise interpretation;
+- `.depthwise` when input/output are rank 4 with batch 1, `group == C_in`, the
+  weight is `[C_out, 1, H, W]`, `C_out % C_in == 0`, `ch_mult >= 1`, output
+  channels match `C_out`, and dilation is unit;
+- `.none` for every other case, which keeps the embedded dispatcher.
 
-## Emitted constants and naming
+`qlinearconv_isSupported(...)` remains a boolean compatibility helper defined
+as `qlinearconv_classify(op) != .none`.
 
-`write_cmsis_prepared` emits five constants per prepared node using a hybrid
-scheme (weight `<w>`, bias `<b>`, output `<out>`, all sanitized names):
+## `Prepared`
 
-| Constant     | Symbol                              | Keyed by |
-|--------------|-------------------------------------|----------|
-| filter (i8)  | `cmsis_tensor_<w>`                   | weight   |
-| filter_shape | `cmsis_tensor_<w>_filter_shape`     | weight   |
-| bias (i32)   | `cmsis_tensor_<b>` / `cmsis_tensor_<out>_bias` when no bias | bias / output |
-| multiplier   | `cmsis_tensor_<out>_multiplier`     | output   |
-| shift        | `cmsis_tensor_<out>_shift`          | output   |
+The owned preparation result contains:
 
-The requant arrays are output-keyed because they depend on the node's scales
-(per-node), while the filter depends only on the weight+zero-point; emission is
-deduped by symbol name so a weight shared by two prepared nodes is written once.
+- `kind`;
+- signed `filter_s8` and `filter_shape`;
+- `bias_i32`;
+- per-channel `multipliers` and `shifts`;
+- `ch_mult` (`1` for standard convolution).
 
-## Flash / drop-originals behavior
+The caller releases all owned buffers with `Prepared.deinit(...)`.
 
-On CMSIS builds, a prepared node's **original filter and bias initializers are
-dropped** from `static_parameters.zig` (see `parameters.zig` `buildExcludedInitializers`)
-— the folded-in `cmsis_` versions replace them, so the filter is not stored
-twice. Scale and zero-point tensors are kept (the input/output zero-points are
-still read at runtime for the activation offsets). Because `qlinearconv_isSupported`
-already validated the node at codegen, the runtime prepared bridge has no embedded
-fallback and needs no original tensors.
+## Standard preparation
 
-## Weight zero-point coercion
+The standard path reorders raw OIHW weights to CMSIS OHWI, coerces the weight
+zero-point consistently with normal parameter output, and converts the filter to
+signed `i8`. It then shares bias and requant preparation with the depthwise path.
 
-`coerceWeightZeroPointI32` reproduces the name-keyed zero-point coercion that
-`parameters.zig` applies when it stores zero-point tensors (weight zero-points —
-name contains `zero_point` and `const_fold_opt` — are stored as `i8`; other
-zero-points as `u8`). This guarantees the prepared filter matches what the
-reference path would compute from the generated weight zero-point.
+## Depthwise preparation
+
+The depthwise path deliberately prepares signed filter values while the filter
+is still `[C_out, 1, H, W]`. This ensures a per-channel weight zero-point indexes
+axis 0 correctly. Only afterward does it reorder the signed filter to
+`[1, H, W, C_out]`.
+
+The final bias and per-channel multiplier/shift generation reuses
+`prepareBiasI32(...)` and `makePerChannelRequantParams(...)`, exactly as the
+standard path does.
+
+## Consumers and emission
+
+- `op_qlinearconv.zig` exposes the optional CMSIS hooks and switches locally on
+  `CmsisKind` when emitting runtime code.
+- `op_qlinearconv/cmsis_parameters.zig` calls `qlinearconv_prepare(...)` and
+  provides its data to the generic emitter.
+- `parameters.zig` knows neither QLinearConv nor `CmsisKind`; it invokes only the
+  generic capability layer documented in `parameter_codegen.md`.
+
+Prepared symbols are output-keyed as documented in `cmsis_parameters.md`.
+
+## Extension boundary
+
+True grouped convolution can add a future `.grouped` classifier and local
+preparation branch here. The generic CMSIS parameter writer and hook discovery
+do not need to change.

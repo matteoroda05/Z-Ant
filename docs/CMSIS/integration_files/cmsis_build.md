@@ -52,19 +52,28 @@ CMSIS-DSP `v1.17.0`. The build helper does not run the fetch scripts itself.
 
 ## Current source-list validation
 
-The ordinary native test suite and the optional host CMSIS test both pass all
-258 tests. The curated list includes
+The ordinary native test suite passes with 259 tests and three CMSIS-only tests
+skipped. The optional host CMSIS suite passes all 262 tests, including direct
+signed and unsigned depthwise wrapper comparisons. The curated list includes
 `Source/ConvolutionFunctions/arm_nn_mat_mult_kernel_row_offset_s8_s16.c`, which
 supplies the transitive symbol used by `arm_convolve_s8.c`.
 
+The existing source registration also contains the M4/M7 depthwise wrapper and
+kernel implementations required by `arm_depthwise_conv_wrapper_s8`; adding the
+depthwise Zig bridge required no new source-list entry.
+
 ## Current cross-build status
 
-The Arm build layer can now select and validate a Cortex-M profile and a
-complete Arm GNU Toolchain. The preferred Cortex-M7 command is:
+The Arm build layer selects and validates a Cortex-M profile and a complete Arm
+GNU Toolchain. Both supported CMSIS static-library profiles pass:
 
 ```bash
 zig build lib -Dmodel=beer \
   -Darm_profile=cortex_m7_fpv5_d16_softfp \
+  -Denable_CMSIS=true
+
+zig build lib -Dmodel=beer \
+  -Darm_profile=cortex_m4_fpv4_sp_d16_softfp \
   -Denable_CMSIS=true
 ```
 
@@ -73,12 +82,13 @@ prints the expected installation path plus `./scripts/fetch_arm_toolchain.py`.
 An external complete toolchain can be selected with
 `-Darm_toolchain=external -Darm_toolchain_path=/absolute/path`.
 
-The resolver finds compatible newlib headers and libraries. This helper now
+The resolver finds compatible newlib headers and libraries. This helper
 adds the resolved GCC and newlib include directories to CMSIS modules and C
 compilation, so headers such as `string.h` come from the selected complete
 toolchain. It deliberately does not attach or bundle `libc.a`, `libm.a`, or
 `libgcc`; those archives belong to a later final-executable or firmware-link
-step. The real Cortex-M cross-build has not yet validated this header plumbing.
+step. The successful M4/M7 static-library cross-builds validate this header and
+CMSIS C-source plumbing, but not final firmware linkage or execution.
 
 ## Current Boundaries
 

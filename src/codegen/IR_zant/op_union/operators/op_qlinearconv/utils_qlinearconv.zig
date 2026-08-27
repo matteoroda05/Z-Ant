@@ -1172,6 +1172,47 @@ pub fn qlinearconv_dispatch_cmsis_prepared(
     );
 }
 
+/// Dispatches a prepared 2D depthwise QLinearConv to the CMSIS-NN wrapper.
+/// The wrapper performs the target- and shape-specific optimized-kernel choice.
+pub fn qlinearconv_dispatch_cmsis_depthwise_prepared(
+    comptime InputType: anytype,
+    x: *const Tensor(InputType),
+    x_zero_point: anytype,
+    output: *Tensor(InputType),
+    y_zero_point: anytype,
+    filter_data: []const i8,
+    filter_shape: [4]usize,
+    bias: []const i32,
+    multipliers: []const i32,
+    shifts: []const i32,
+    ch_mult: usize,
+    stride: ?[]const usize,
+    pads: ?[]const usize,
+    dilations: ?[]const usize,
+    group: ?usize,
+    auto_pad: []const u8,
+) !void {
+    const cmsis_depthwise = @import("cmsis_depthwise_qlinearconv.zig");
+    return cmsis_depthwise.qlinearconvDepthwiseNchw(
+        InputType,
+        x,
+        x_zero_point,
+        output,
+        y_zero_point,
+        filter_data,
+        filter_shape,
+        bias,
+        multipliers,
+        shifts,
+        ch_mult,
+        stride,
+        pads,
+        dilations,
+        group,
+        auto_pad,
+    );
+}
+
 /// Calculate output shape for QLinearConv - same as regular Conv
 pub fn get_qlinearconv_output_shape(
     comptime T: type,

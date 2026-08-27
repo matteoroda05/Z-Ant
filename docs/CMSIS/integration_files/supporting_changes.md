@@ -10,9 +10,13 @@ files documented in this directory, including:
 - `build.zig`
 - `src/codegen/IR_zant/cmsis/mod_cmsis.zig`
 - `src/codegen/IR_zant/cmsis/layout.zig`
+- `src/codegen/IR_zant/cmsis/parameter_codegen.zig`
+- `src/codegen/IR_zant/cmsis/prepare.zig`
 - `src/codegen/IR_zant/cmsis/quant.zig`
 - `src/codegen/IR_zant/cmsis/cmsis_test.zig`
 - `src/codegen/IR_zant/op_union/operators/op_qlinearconv/cmsis_qlinearconv.zig`
+- `src/codegen/IR_zant/op_union/operators/op_qlinearconv/cmsis_depthwise_qlinearconv.zig`
+- `src/codegen/IR_zant/op_union/operators/op_qlinearconv/cmsis_parameters.zig`
 - `src/utils/utils.zig`
 - `zantBuild/cmsis_build.zig`
 - `scripts/fetch_cmsis_nn.sh`
@@ -24,7 +28,7 @@ files documented in this directory, including:
 These files connect the CMSIS helper layer to the broader project. They carry
 CMSIS decisions into build options, expose the CMSIS package through `IR_zant`,
 wire runtime artifacts for CMSIS C linkage, and route preparable QLinearConv
-nodes to the codegen-prepared CMSIS bridge.
+nodes to the appropriate standard or depthwise codegen-prepared CMSIS bridge.
 
 The vendor acquisition scripts are documented together in `scripts.md`.
 
@@ -164,66 +168,70 @@ Adds the CMSIS helper tests to the IR test aggregation:
 _ = @import("IR_zant/cmsis/cmsis_test.zig");
 ```
 
-Why this matters: the shared layout and quantization helpers are part of
-`IR_zant`, so their focused tests should run with the IR test suite.
+Why this matters: the shared layout, quantization, parameter-capability, and
+depthwise runtime helpers are part of `IR_zant`, so their focused tests run with
+the IR test suite.
 
 ## `src/codegen/IR_zant/op_union/operators/op_qlinearconv/utils_qlinearconv.zig`
 
-`qlinearconv_dispatch()` is now **embedded-only**: it always calls
-`qlinearconv_embedded_lean()`. The previous runtime CMSIS branch (which tried the
-on-the-fly `qlinearconvNchwBridge`, falling back to embedded on
-`error.UnsupportedCmsisQLinearConv` unless CMSIS was forced) was removed together
-with the on-the-fly bridge itself.
+`qlinearconv_dispatch()` remains **embedded-only**. Prepared standard and
+depthwise nodes use two separate lazy dispatchers:
 
-Why this matters: CMSIS acceleration is now decided entirely at code-generation
-time. A preparable node has `write_op` emit `qlinear_conv_dispatch_cmsis_prepared`
-(the codegen-prepared path); any node that reaches the generic
-`qlinearconv_dispatch` is one the generator did **not** prepare, and the removed
-runtime bridge would have rejected it anyway (e.g. `group != 1`) — so there is
-nothing left for this dispatcher to try at runtime. It stays the single backend
-decision point for non-preparable nodes without importing `build_options`.
+- `qlinearconv_dispatch_cmsis_prepared(...)` imports the standard CMSIS bridge;
+- `qlinearconv_dispatch_cmsis_depthwise_prepared(...)` imports the depthwise
+  CMSIS bridge and forwards `ch_mult`.
+
+Neither prepared dispatcher contains an embedded fallback. CMSIS eligibility is
+decided during code generation; any `.none` node reaches the embedded-only
+dispatcher directly.
 
 ## Code-generation-time CMSIS preparation
 
-These changes move QLinearConv's static CMSIS work (filter OHWI reorder + `i8`
-pack, bias→`i32`, per-channel requant) from every runtime call into lib-gen, and
-make the runtime CMSIS path layout-only. See `prepare.md` and
-`cmsis_qlinearconv.md` for the details; the supporting wiring is:
+These changes move QLinearConv's static CMSIS work into lib-gen and leave both
+runtime bridges responsible only for input-dependent layout/domain conversion,
+scratch allocation, one CMSIS call, and output writeback. The supporting wiring
+is:
 
-- **`src/codegen/IR_zant/cmsis/mod_cmsis.zig`** — exports `pub const prepare` and
-  adds `isCmsisSupported(node: anytype) bool`, the single op-type gate the
-  generator consults (delegates the qlinearconv case to `prepare.qlinearconv_isSupported`).
-- **`src/codegen/IR_zant/cmsis/prepare.zig`** (new) — host-safe codegen-time
-  preparation; see `prepare.md`.
+- **`src/codegen/IR_zant/cmsis/mod_cmsis.zig`** — exports the layout,
+  parameter-codegen, quant, and prepare modules. Its compatibility node gate
+  delegates to generic capability discovery rather than switching on operators.
+- **`src/codegen/IR_zant/cmsis/parameter_codegen.zig`** — discovers optional
+  operator hooks with `inline else`/`@hasDecl`, protects shared initializers, and
+  owns prepared-array formatting and symbol deduplication. See
+  `parameter_codegen.md`.
+- **`src/codegen/IR_zant/cmsis/prepare.zig`** — classifies QLinearConv as
+  `.none`, `.standard`, or `.depthwise` and prepares the matching filter layout.
+  See `prepare.md`.
 - **`src/codegen.zig` + `src/codegen/parameter_writer.zig`** — thread the
   linearized node list into the parameters writer
   (`ParametersWriter.write(generated_path, linearizedGraph.items)` →
   `write_parameters(writer, linearizedGraph)`). The parameters phase previously
   saw only a flat tensor map; it needs whole nodes to prepare per-conv constants,
   and it runs before the predict file where `static_parameters.zig` is closed.
-- **`src/codegen/parameters/parameters.zig`** — on CMSIS builds:
-  `buildExcludedInitializers` collects the prepared nodes' original filter/bias
-  names (minus anything a non-prepared node references) and `write_initilizers`
-  skips them (drop-originals, no flash duplication); `write_cmsis_prepared`
-  emits the five `cmsis_` constants per prepared node (deduped by symbol name)
-  into `static_parameters.zig`.
-- **`op_qlinearconv/op_qlinearconv.zig`** (`write_op`) — when
-  `cmsisUsed() and qlinearconv_isSupported(&self)`, emits
-  `tensMath.qlinear_conv_dispatch_cmsis_prepared(...)` referencing the `cmsis_`
-  constants (and no original weight/scale/bias); otherwise the standard call.
-  `getMathErrorReturn()` is invoked in exactly one branch.
-- **`op_qlinearconv/utils_qlinearconv.zig`** — adds
-  `qlinearconv_dispatch_cmsis_prepared(...)`, a slim dispatcher (input +
-  zero-points + the prepared slices) that calls `qlinearconvNchw(...)` with no
-  embedded fallback.
+- **`src/codegen/parameters/parameters.zig`** — asks the generic CMSIS layer for
+  safely excludable initializers, writes ordinary parameters, then asks it to
+  emit prepared constants. It contains no operator or CMSIS-kind branch.
+- **`op_qlinearconv/cmsis_parameters.zig`** — implements QLinearConv's local
+  replacement and emission adapter. All five prepared symbols are keyed by the
+  node output. See `cmsis_parameters.md`.
+- **`op_qlinearconv/op_qlinearconv.zig`** — exposes the optional CMSIS hooks and
+  switches locally on `CmsisKind`: standard and depthwise emit their respective
+  prepared dispatcher; `.none` emits the embedded dispatcher.
+- **`op_qlinearconv/utils_qlinearconv.zig`** — owns the standard and depthwise
+  lazy dispatcher functions without importing build options.
 - **`op_qlinearconv/cmsis_qlinearconv.zig`** — reduced to two prepared,
   layout-only public bridges (`qlinearconvNchw` / `qlinearconvNhwc`) over a single
   private CMSIS kernel call (`runCmsisConvolve`); the on-the-fly runtime bridges
   and their filter/bias/requant conversion calls were removed (see
   `cmsis_qlinearconv.md`).
+- **`op_qlinearconv/cmsis_depthwise_qlinearconv.zig`** — implements the NCHW
+  depthwise bridge over `arm_depthwise_conv_wrapper_s8`, passing `ch_mult` and
+  using the wrapper's matching buffer-size getter. See
+  `cmsis_depthwise_qlinearconv.md`.
 - **`op_union/operators/zant_math_standard.zig`** — exports
-  `qlinear_conv_dispatch_cmsis_prepared` (and the `qlinearconv_` alias).
+  both prepared dispatchers and their backward-compatible aliases.
 
-Why this matters: preparable QLinearConv nodes stop recomputing static data on
-every inference and no longer store their filter twice in flash, while
-non-preparable nodes and non-CMSIS builds are unchanged.
+Why this matters: standard and depthwise QLinearConv nodes avoid repeated static
+preparation and unnecessary flash duplication. Future CMSIS operators can use
+the same capability boundary without adding branches to the global parameter
+writer, while unsupported and non-CMSIS nodes remain unchanged.

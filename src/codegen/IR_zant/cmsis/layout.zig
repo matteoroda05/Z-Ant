@@ -83,6 +83,46 @@ pub fn oihwToCmsisFilterLayout(
     return filters;
 }
 
+/// Reorders a signed depthwise filter from ONNX `[C_out, 1, H, W]` layout to
+/// CMSIS-NN `[1, H, W, C_out]` layout.
+///
+/// Signed-domain conversion must happen before this transformation because the
+/// generic filter preparation helper identifies output channels along axis 0.
+pub fn oihwToCmsisDepthwiseLayout(
+    comptime T: type,
+    allocator: *const std.mem.Allocator,
+    weights_oihw: *const Tensor(T),
+    ch_mult: usize,
+) !Tensor(T) {
+    if (weights_oihw.shape.len != 4) return error.InvalidShape;
+    if (ch_mult == 0) return error.InvalidGroupParameter;
+
+    const out_channels = weights_oihw.shape[0];
+    const in_channels_per_group = weights_oihw.shape[1];
+    const kernel_height = weights_oihw.shape[2];
+    const kernel_width = weights_oihw.shape[3];
+
+    if (out_channels == 0 or kernel_height == 0 or kernel_width == 0) return error.InvalidShape;
+    if (in_channels_per_group != 1) return error.InvalidShape;
+    if (out_channels % ch_mult != 0) return error.InvalidGroupParameter;
+
+    var cmsis_shape = [_]usize{ 1, kernel_height, kernel_width, out_channels };
+    var filters = try Tensor(T).fromShape(allocator, &cmsis_shape);
+    errdefer filters.deinit();
+
+    for (0..kernel_height) |kh| {
+        for (0..kernel_width) |kw| {
+            for (0..out_channels) |oc| {
+                const old_index = (oc * kernel_height + kh) * kernel_width + kw;
+                const new_index = (kh * kernel_width + kw) * out_channels + oc;
+                filters.data[new_index] = weights_oihw.data[old_index];
+            }
+        }
+    }
+
+    return filters;
+}
+
 /// Validates that an NHWC source tensor and an NCHW destination tensor describe
 /// the same logical 4D output before copying data between layouts.
 fn validateNhwcToNchwShapes(comptime T: type, output_nhwc: *const Tensor(T), output_nchw: *const Tensor(T)) !void {

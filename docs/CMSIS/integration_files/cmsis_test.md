@@ -2,25 +2,48 @@
 
 ## Role
 
-`cmsis_test.zig` contains focused tests for the reusable CMSIS helper layer. It
-does not call CMSIS C kernels; it validates the pure Zig layout and quantization
-adapters that the QLinearConv bridge depends on.
+`cmsis_test.zig` covers the reusable CMSIS layout/quantization layer and the
+prepared depthwise runtime bridge. Pure Zig cases run in every host suite;
+kernel cases are compile-time skipped unless CMSIS is enabled for a Cortex-M
+configuration hint.
 
-## Test Cases
+Generic parameter-capability tests live beside their implementation in
+`parameter_codegen.zig`.
 
-- `CMSIS layout converts NHWC output into NCHW destination`: verifies CMSIS
-  output can be copied into an already allocated Z-Ant output tensor.
-- `CMSIS layout packs OIHW filters into OHWI`: verifies standard convolution
-  filters are reordered into CMSIS layout.
-- `CMSIS quant prepares per-channel requant params and packed filters`: checks
-  requant array allocation and signed filter packing with per-channel
-  zero-points.
-- `CMSIS quant converts u8 activation and output domains`: verifies the unsigned
-  ONNX-style activation domain is shifted into and out of CMSIS signed `i8`.
+## Always-enabled helper tests
 
-## Motivation
+- NHWC output to caller-owned NCHW output conversion.
+- Standard OIHW to OHWI filter packing.
+- Depthwise `[C_out,1,H,W]` to `[1,H,W,C_out]` packing for representative
+  `ch_mult` values 1, 3, and 4.
+- Per-channel requant allocation and signed filter preparation.
+- `u8` activation conversion into and out of CMSIS's signed domain.
 
-The CMSIS bridge depends on layout and quantization conversions before the C
-kernel call is possible. These tests give that shared helper layer coverage
-without requiring vendored CMSIS-NN headers or source files.
+## CMSIS-enabled runtime tests
 
+- Deterministic signed depthwise convolution with `ch_mult == 1`.
+- Deterministic unsigned depthwise convolution with `ch_mult > 1`, bias and
+  per-channel requant parameters.
+- Rejection of batch greater than one.
+- Rejection of dilation greater than one.
+
+These call the exported lazy depthwise dispatcher, which reaches the real
+`arm_depthwise_conv_wrapper_s8` implementation linked into the host test
+artifact.
+
+## Commands and expected results
+
+```bash
+zig build test --summary all
+```
+
+Expected current result: 259 passed and 3 CMSIS-only tests skipped.
+
+```bash
+zig build test -Denable_CMSIS=true -Dcpu=cortex_m7 --summary all
+```
+
+Expected current result: 262/262 passed.
+
+The CMSIS-enabled host run validates deterministic correctness and C-source
+linkage. It does not replace Cortex-M firmware execution or performance tests.

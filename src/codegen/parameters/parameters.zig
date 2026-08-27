@@ -61,7 +61,7 @@ pub inline fn write_parameters(writer: *std.Io.Writer, linearizedGraph: []const 
     var excluded = std.StringHashMap(void).init(allocator);
     defer excluded.deinit();
     if (comptime IR_zant.cmsis.cmsisUsed()) {
-        try buildExcludedInitializers(&excluded, linearizedGraph);
+        try IR_zant.cmsis.parameter_codegen.collectExcludedInitializers(&excluded, linearizedGraph, &allocator);
     }
 
     try writer.print(
@@ -92,45 +92,12 @@ pub inline fn write_parameters(writer: *std.Io.Writer, linearizedGraph: []const 
             \\ // +   CMSIS-NN prepared constants (codegen-time)       +
             \\ // -----------------------------------------------------
         , .{});
-        try write_cmsis_prepared(writer, linearizedGraph);
-    }
-}
-
-/// Collects the sanitized names of the original filter/bias initializers that
-/// belong to preparable QLinearConv nodes and are safe to drop, i.e. not
-/// referenced by any non-prepared node. On CMSIS builds these originals are
-/// replaced by the folded-in `cmsis_` constants.
-fn buildExcludedInitializers(excluded: *std.StringHashMap(void), nodes: []const *NodeZant) !void {
-    var candidates = std.StringHashMap(void).init(allocator);
-    defer candidates.deinit();
-    var protected = std.StringHashMap(void).init(allocator);
-    defer protected.deinit();
-
-    for (nodes) |node| {
-        if (IR_zant.cmsis.isCmsisSupported(node.*)) {
-            switch (node.op) {
-                .qlinearconv => |*q| {
-                    try candidates.put(try q.input_w.getNameSanitized(), {});
-                    if (q.input_B) |bias| {
-                        if (bias.name.len != 0) try candidates.put(try bias.getNameSanitized(), {});
-                    }
-                },
-                else => {},
-            }
-        } else {
-            // Anything a non-prepared node consumes must stay in flash.
-            // (Returned slice is owned by the op's own allocator; not freed here
-            // because this is a short-lived host codegen pass.)
-            const inputs = node.get_input_tensors() catch continue;
-            for (inputs) |tensor| {
-                try protected.put(try tensor.getNameSanitized(), {});
-            }
-        }
-    }
-
-    var it = candidates.keyIterator();
-    while (it.next()) |key| {
-        if (!protected.contains(key.*)) try excluded.put(key.*, {});
+        try IR_zant.cmsis.parameter_codegen.emitPreparedParameters(
+            writer,
+            linearizedGraph,
+            &allocator,
+            global_xip_config.getLinkSection(),
+        );
     }
 }
 
@@ -203,82 +170,6 @@ fn write_constantTensors(writer: *std.Io.Writer) !void {
             \\pub const tensor_{s} = Tensor({s}).fromConstBuffer(&allocator, &array_{s}, &shape_tensor_{s});
         , .{ name, constant_tensors.ty.toString(), name, name });
     }
-}
-
-/// Emits the codegen-time CMSIS-NN constants for every preparable QLinearConv
-/// node into `static_parameters.zig`. Names follow the hybrid scheme:
-/// filter/filter_shape are weight-keyed (`cmsis_tensor_<w>` /
-/// `cmsis_tensor_<w>_filter_shape`); bias is bias-keyed (`cmsis_tensor_<b>`) or
-/// output-keyed when the node has no bias; the per-node requant arrays are
-/// output-keyed (`cmsis_tensor_<out>_multiplier` / `_shift`). Emission is deduped
-/// by symbol name so a weight shared by two prepared nodes is written once.
-fn write_cmsis_prepared(writer: *std.Io.Writer, nodes: []const *NodeZant) !void {
-    const section = global_xip_config.getLinkSection();
-
-    var emitted = std.StringHashMap(void).init(allocator);
-    defer emitted.deinit();
-
-    for (nodes) |node| {
-        switch (node.op) {
-            .qlinearconv => |*q| {
-                if (!IR_zant.cmsis.prepare.qlinearconv_isSupported(q)) continue;
-
-                var prepared = try IR_zant.cmsis.prepare.qlinearconv_prepare(&allocator, q);
-                defer prepared.deinit(&allocator);
-
-                const w_name = try q.input_w.getNameSanitized();
-                const out_name = try q.output_y.getNameSanitized();
-
-                const filter_symbol = try std.fmt.allocPrint(allocator, "cmsis_tensor_{s}", .{w_name});
-                const shape_symbol = try std.fmt.allocPrint(allocator, "cmsis_tensor_{s}_filter_shape", .{w_name});
-                const bias_symbol = if (q.input_B) |bias| blk: {
-                    if (bias.name.len != 0) break :blk try std.fmt.allocPrint(allocator, "cmsis_tensor_{s}", .{try bias.getNameSanitized()});
-                    break :blk try std.fmt.allocPrint(allocator, "cmsis_tensor_{s}_bias", .{out_name});
-                } else try std.fmt.allocPrint(allocator, "cmsis_tensor_{s}_bias", .{out_name});
-                const mult_symbol = try std.fmt.allocPrint(allocator, "cmsis_tensor_{s}_multiplier", .{out_name});
-                const shift_symbol = try std.fmt.allocPrint(allocator, "cmsis_tensor_{s}_shift", .{out_name});
-
-                // filter_shape is weight-keyed, tiny, and needs no flash section.
-                if (!emitted.contains(shape_symbol)) {
-                    try emitted.put(shape_symbol, {});
-                    try writer.print(
-                        \\
-                        \\pub const {s} : [4]usize = [_]usize{{ {d}, {d}, {d}, {d} }};
-                    , .{ shape_symbol, prepared.filter_shape[0], prepared.filter_shape[1], prepared.filter_shape[2], prepared.filter_shape[3] });
-                }
-
-                try emitCmsisArray(writer, &emitted, filter_symbol, i8, "i8", section, prepared.filter_s8);
-                try emitCmsisArray(writer, &emitted, bias_symbol, i32, "i32", section, prepared.bias_i32);
-                try emitCmsisArray(writer, &emitted, mult_symbol, i32, "i32", section, prepared.multipliers);
-                try emitCmsisArray(writer, &emitted, shift_symbol, i32, "i32", section, prepared.shifts);
-            },
-            else => {},
-        }
-    }
-}
-
-/// Emits one `pub const <symbol> : [N]T linksection(...) = [_]T{...};` array,
-/// skipping it if a constant with that name was already written this pass.
-fn emitCmsisArray(
-    writer: *std.Io.Writer,
-    emitted: *std.StringHashMap(void),
-    symbol: []const u8,
-    comptime T: type,
-    type_name: []const u8,
-    section: []const u8,
-    data: []const T,
-) !void {
-    if (emitted.contains(symbol)) return;
-    try emitted.put(symbol, {});
-
-    try writer.print(
-        \\
-        \\pub const {s} : [{d}]{s} linksection("{s}") = [_]{s}{{
-    , .{ symbol, data.len, type_name, section, type_name });
-    try writeArrayData(writer, T, data);
-    try writer.print(
-        \\}} ;
-    , .{});
 }
 
 /// Writes the required library imports to the generated Zig file for input tensor.

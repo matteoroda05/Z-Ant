@@ -2,81 +2,61 @@
 
 ## Role
 
-`mod_cmsis.zig` is the IR-side CMSIS-NN usage gate. Code under `IR_zant` should
-query this module when it needs to know whether CMSIS-NN is enabled for the
-current build. It also re-exports the shared CMSIS helper packages.
+`mod_cmsis.zig` is the public IR-side CMSIS helper surface and build-usage gate.
+Code under `IR_zant` queries this module rather than importing build options or
+individual CMSIS helper files directly.
 
 ## Exports
 
-The module currently exposes:
-
 ```zig
 pub const layout = @import("layout.zig");
+pub const parameter_codegen = @import("parameter_codegen.zig");
 pub const quant = @import("quant.zig");
 pub const prepare = @import("prepare.zig");
 ```
 
-Why this matters: callers can use `IR_zant.cmsis.layout`,
-`IR_zant.cmsis.quant`, and `IR_zant.cmsis.prepare` as the shared CMSIS helper
-surface instead of importing individual files from operator-specific folders.
+- `layout` owns reusable CMSIS tensor-layout transformations.
+- `parameter_codegen` discovers optional operator capabilities and owns generic
+  prepared-constant emission and initializer-use analysis.
+- `quant` owns signed-domain, bias, offset, and requant helpers.
+- `prepare` owns QLinearConv classification and codegen-time preparation.
 
-## `isCmsisSupported`
+## Node capability gate
 
 ```zig
 pub fn isCmsisSupported(node: anytype) bool
 ```
 
-The single gate the code generator consults to decide whether a node can be
-accelerated by CMSIS-NN today. It dispatches on the operator type and delegates
-per-node eligibility to the operator-specific checker in `prepare.zig`
-(`.qlinearconv => prepare.qlinearconv_isSupported(...)`, else `false`). Only
-QLinearConv can currently return `true`. `node` is taken as `anytype` so this
-file does not import the node/op-union modules that would form an import cycle.
+This compatibility entry point delegates to
+`parameter_codegen.isSupported(node)`. The generic capability layer uses
+`inline else` and `@hasDecl` to call the active operator payload's optional
+`cmsis_is_supported` method. Operators without the method return `false`
+automatically; `mod_cmsis.zig` contains no operator-specific switch.
 
-See `prepare.md` for how the generator uses this gate to precompute and emit the
-`cmsis_` constants and to drop the replaced originals.
+See `parameter_codegen.md` for the complete hook and initializer-exclusion
+contract.
 
-## Current Decision
-
-The module reads build options through the `zant_utils` owner module. Callers do
-not pass or import `build_options` directly:
+## Build usage gate
 
 ```zig
-const zant_utils = @import("zant_utils");
-
 pub fn cmsisUsed() bool
 ```
 
-`cmsisUsed()` returns true when `enable_cmsis` exists and is true, and
-`target_is_cortex_m` exists and is true.
+The module reads build options through `zant_utils.build_options` and returns
+true only for:
 
-In compact form:
-
-```zig
+```text
 enable_cmsis and target_is_cortex_m
 ```
 
-## Why `@hasDecl` Is Used
+Each field is guarded with `@hasDecl`, keeping compilation safe for option
+modules that do not expose CMSIS fields.
 
-Each field access is guarded with `@hasDecl(build_options, "...")` after
-loading `build_options` from `zant_utils.build_options`.
+## Behavior boundaries
 
-This keeps the decision compile-safe when some CMSIS-related fields are missing
-from the options module owned by `zant_utils`.
+This module does not add C sources or include paths, call CMSIS kernels, classify
+QLinearConv itself, or inspect Zig target metadata. Build wiring remains in
+`zantBuild/cmsis_build.zig`; operator eligibility remains operator-owned.
 
-## Behavior Boundaries
-
-This module does not:
-
-- add CMSIS sources;
-- add CMSIS include paths;
-- call CMSIS kernels;
-- require QLinearConv utilities to import `build_options`;
-- inspect Zig target metadata directly.
-
-Its decision function only answers a compile-time question about whether
-CMSIS-NN should be considered active for this build. Code that calls it should
-use `IR_zant.cmsis.cmsisUsed()`.
-
-The layout and quant exports are pure Zig helper modules. They do not import
-`build_options` and do not activate CMSIS by themselves.
+The pure Zig layout, parameter, quantization, and preparation exports do not
+activate CMSIS by themselves.

@@ -2,9 +2,10 @@
 
 ## Role
 
-`cmsis_qlinearconv.zig` is the QLinearConv-specific CMSIS-NN **runtime** bridge.
-It adapts Z-Ant's QLinearConv activations to CMSIS-NN's `arm_convolve_wrapper_s8`
-ABI.
+`cmsis_qlinearconv.zig` is the standard QLinearConv CMSIS-NN **runtime** bridge.
+It adapts Z-Ant's QLinearConv activations to CMSIS-NN's
+`arm_convolve_wrapper_s8` ABI. Depthwise QLinearConv uses the separate bridge
+documented in `cmsis_depthwise_qlinearconv.md`.
 
 It assumes the **static** data is already prepared. The filter (OHWI `i8`), bias
 (`i32`), and per-channel requant multiplier/shift arrays are computed once at
@@ -19,14 +20,15 @@ import this file and which bridge to call.
 
 ## Generated-Code Dispatch Path
 
-For a preparable QLinearConv node (one that `IR_zant.cmsis.isCmsisSupported(...)`
-accepts) on a CMSIS build, the CMSIS call becomes reachable through this path:
+For a node classified `.standard` on a CMSIS build, the standard CMSIS call
+becomes reachable through this path:
 
 1. `src/codegen/predict/emit.zig` or `src/codegen/predict/predict.zig` walks
    graph nodes and calls `node.write_op(writer)`.
 2. `NodeZant.write_op(...)` delegates to `Op_union.write_op(...)`, which for a
    QLinearConv node calls `QLinearConv.write_op(...)`.
-3. `QLinearConv.write_op(...)` emits generated model code that calls
+3. `QLinearConv.write_op(...)` switches on `CmsisKind` and, for `.standard`,
+   emits generated model code that calls
    `tensMath.qlinear_conv_dispatch_cmsis_prepared(...)`, passing the input,
    zero-points, and the node's `cmsis_` constants.
 4. `zant_math_standard.zig` exports `qlinear_conv_dispatch_cmsis_prepared` from
@@ -34,9 +36,11 @@ accepts) on a CMSIS build, the CMSIS call becomes reachable through this path:
 5. `qlinearconv_dispatch_cmsis_prepared(...)` imports `cmsis_qlinearconv.zig` and
    calls `qlinearconvNchw(...)`.
 
-Non-preparable nodes (e.g. `group != 1`) instead have `write_op` emit the generic
-`tensMath.qlinear_conv_dispatch(...)`, which is now **embedded-only** — it no
-longer tries a runtime CMSIS bridge (see `supporting_changes.md`).
+Nodes classified `.depthwise` emit the separate prepared depthwise dispatcher
+documented in `cmsis_depthwise_qlinearconv.md`. Nodes classified `.none`, such
+as true grouped convolution, emit the generic
+`tensMath.qlinear_conv_dispatch(...)`, which is **embedded-only** and does not
+attempt a runtime CMSIS fallback.
 
 Generated model code therefore names a dispatch symbol, not `qlinearconvNchw(...)`
 or `qlinearconvNhwc(...)` directly.
@@ -88,9 +92,9 @@ filter/bias/requant work.
 
 ## Current Boundaries
 
-This is not yet a complete QLinearConv accelerator. It targets the standard
-`arm_convolve_wrapper_s8` path and deliberately rejects cases that need
-additional CMSIS handling, such as grouped convolution — which is why those nodes
-stay on the embedded path. There is also no generated-code option yet that selects
-`qlinearconvNhwc(...)`; it is a callable entry point, but dispatch/generator
-layout selection would need a separate change before generated models use it.
+This file deliberately covers only the standard `arm_convolve_wrapper_s8` path.
+Depthwise convolution uses its dedicated bridge because CMSIS-NN requires a
+different parameter structure, filter layout, wrapper, and buffer-size getter.
+True grouped convolution remains embedded. There is also no generated-code
+option yet that selects `qlinearconvNhwc(...)`; dispatch/generator layout
+selection would need a separate change before generated models use it.

@@ -2,28 +2,36 @@
 
 ## Role
 
-`layout.zig` contains reusable tensor-layout helpers for CMSIS-NN backends.
-It keeps CMSIS layout adaptation out of individual operator folders, so future
-CMSIS-backed operators can reuse the same conversion surface.
+`layout.zig` contains reusable tensor-layout helpers for CMSIS-NN backends. It
+only moves elements; signed-domain conversion, zero-point handling, bias
+preparation, and requantization remain in `quant.zig`.
 
 ## Functions
 
-- `nchwToNhwc(...)`: converts Z-Ant activation tensors from `[N, C, H, W]` to
-  CMSIS-NN's `[N, H, W, C]` input layout. It delegates to the existing generic
-  tensor utility instead of duplicating permutation logic.
-- `nhwcToNchwInto(...)`: copies a CMSIS-NN `[N, H, W, C]` output tensor into an
-  already allocated Z-Ant `[N, C, H, W]` output tensor. This preserves the
-  existing generated-code ownership model.
-- `oihwToCmsisFilterLayout(...)`: reorders filters from ONNX/Z-Ant
-  `[O, I/group, H, W]` into CMSIS standard convolution layout
-  `[O, H, W, I/group]`.
-- `validateNhwcToNchwShapes(...)`: private guard that checks source/destination
-  tensors describe the same logical 4D output before layout copying.
+- `nchwToNhwc(...)` converts Z-Ant activations from `[N, C, H, W]` to CMSIS-NN
+  `[N, H, W, C]` by delegating to the existing generic tensor utility.
+- `nhwcToNchwInto(...)` copies a CMSIS-NN output into an already allocated Z-Ant
+  output tensor, preserving generated-code allocation ownership.
+- `oihwToCmsisFilterLayout(...)` reorders standard convolution filters from
+  `[O, I/group, H, W]` to `[O, H, W, I/group]`.
+- `oihwToCmsisDepthwiseLayout(...)` reorders a signed depthwise filter from
+  `[C_out, 1, H, W]` to `[1, H, W, C_out]` and validates a non-zero integer
+  channel multiplier.
+- `validateNhwcToNchwShapes(...)` is the private guard for output-layout copies.
 
-## Motivation
+## Depthwise ordering rule
 
-CMSIS-NN convolution wrappers do not use the same memory order as the current
-Z-Ant QLinearConv path. This file isolates that ABI difference in one shared
-place. It only moves tensor elements; signed quantization conversion,
-zero-point handling, and clamping stay in `quant.zig`.
+Depthwise weight zero-points are per output channel, which is axis 0 in ONNX
+OIHW. `prepare.zig` therefore calls `prepareFilterS8(...)` before
+`oihwToCmsisDepthwiseLayout(...)`. Reordering unsigned weights first would lose
+the axis information needed to subtract the correct per-channel zero-point.
 
+The depthwise helper receives already signed values and performs only this
+mapping:
+
+```text
+[C_out, 1, H, W] -> [1, H, W, C_out]
+```
+
+The same prepared format is used for every `ch_mult >= 1`; kernel selection is
+left to the CMSIS-NN depthwise wrapper at runtime.

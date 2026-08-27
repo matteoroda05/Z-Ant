@@ -1,4 +1,5 @@
 pub const layout = @import("layout.zig");
+pub const parameter_codegen = @import("parameter_codegen.zig");
 pub const quant = @import("quant.zig");
 pub const prepare = @import("prepare.zig");
 
@@ -13,10 +14,7 @@ const zant_utils = @import("zant_utils");
 /// `node` is taken as `anytype` (rather than `*const NodeZant`) so this file does
 /// not import the node/op-union modules that would form an import cycle.
 pub fn isCmsisSupported(node: anytype) bool {
-    return switch (node.op) {
-        .qlinearconv => |*q| prepare.qlinearconv_isSupported(q),
-        else => false,
-    };
+    return parameter_codegen.isSupported(node);
 }
 
 pub fn cmsisUsed() bool {

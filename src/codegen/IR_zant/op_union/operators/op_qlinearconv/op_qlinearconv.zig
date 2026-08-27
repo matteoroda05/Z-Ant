@@ -18,6 +18,7 @@ const NodeZant = NodeZant_lib.NodeZant;
 
 const tensorMath = IR_zant.core.math_standard;
 const utils = IR_zant.utils;
+const cmsis_parameters = @import("cmsis_parameters.zig");
 
 // https://onnx.ai/onnx/operators/onnx__QLinearConv.html
 // INPUTS:
@@ -191,6 +192,22 @@ pub const QLinearConv = struct {
         return outputs.toOwnedSlice(allocator);
     }
 
+    /// Optional CMSIS parameter-codegen capability discovered at compile time
+    /// by `cmsis/parameter_codegen.zig`.
+    pub fn cmsis_is_supported(self: QLinearConv) bool {
+        return IR_zant.cmsis.prepare.qlinearconv_isSupported(&self);
+    }
+
+    /// Reports which original initializers this prepared CMSIS node replaces.
+    pub fn cmsis_collect_replaced_initializers(self: QLinearConv, collector: anytype) !void {
+        try cmsis_parameters.collectReplacedInitializers(&self, collector);
+    }
+
+    /// Emits this node's prepared CMSIS constants through the generic emitter.
+    pub fn cmsis_write_prepared_parameters(self: QLinearConv, emitter: anytype) !void {
+        try cmsis_parameters.writePreparedParameters(&self, emitter);
+    }
+
     pub fn write_op(self: QLinearConv, writer: *std.Io.Writer) !void {
         // Create tensor string for input x
         var tensor_x_string: []u8 = undefined;
@@ -256,38 +273,28 @@ pub const QLinearConv = struct {
         // Determine the bias type
         const bias_type = if (self.input_B) |bias_tensor| bias_tensor.ty.toString() else "f32";
 
-        // On CMSIS builds, a preparable node dispatches to the prepared bridge
-        // and references the codegen-time `cmsis_` constants; its original
-        // weight/scale/zero-point/bias are no longer emitted. Otherwise emit the
-        // standard dispatcher call. `getMathErrorReturn()` is invoked in exactly
-        // one branch.
-        const use_prepared = IR_zant.cmsis.cmsisUsed() and IR_zant.cmsis.prepare.qlinearconv_isSupported(&self);
+        // The operator-local classifier selects the generated runtime bridge.
+        // Prepared constants use the output-keyed namespace emitted by the
+        // optional CMSIS parameter hook.
+        const cmsis_kind = if (comptime IR_zant.cmsis.cmsisUsed())
+            IR_zant.cmsis.prepare.qlinearconv_classify(&self)
+        else
+            IR_zant.cmsis.prepare.CmsisKind.none;
+        const out_sani = try utils.getSanitizedName(self.output_y.name);
 
-        if (use_prepared) {
-            const w_sani = try utils.getSanitizedName(self.input_w.name);
-            const out_sani = try utils.getSanitizedName(self.output_y.name);
-
-            // Bias constant name: bias-keyed when the node has a bias tensor,
-            // otherwise output-keyed (matches parameters.zig emission).
-            const bias_symbol = if (self.input_B) |input_B| blk: {
-                if (input_B.name.len > 0) {
-                    break :blk try std.mem.concat(allocator, u8, &[_][]const u8{ "cmsis_tensor_", try utils.getSanitizedName(input_B.name) });
-                }
-                break :blk try std.mem.concat(allocator, u8, &[_][]const u8{ "cmsis_tensor_", out_sani, "_bias" });
-            } else try std.mem.concat(allocator, u8, &[_][]const u8{ "cmsis_tensor_", out_sani, "_bias" });
-
-            try writer.print(
+        switch (cmsis_kind) {
+            .standard => try writer.print(
                 \\    tensMath.qlinear_conv_dispatch_cmsis_prepared(
                 \\        {s}, // InputType
                 \\        {s}, // input x
                 \\        @constCast(&param_lib.tensor_{s}), // x_zero_point
                 \\        &tensor_{s}, // output
                 \\        @constCast(&param_lib.tensor_{s}), // y_zero_point
-                \\        &param_lib.cmsis_tensor_{s}, // filter_data
-                \\        param_lib.cmsis_tensor_{s}_filter_shape, // filter_shape
-                \\        &param_lib.{s}, // bias
-                \\        &param_lib.cmsis_tensor_{s}_multiplier, // multipliers
-                \\        &param_lib.cmsis_tensor_{s}_shift, // shifts
+                \\        &param_lib.cmsis_{s}_filter, // filter_data
+                \\        param_lib.cmsis_{s}_filter_shape, // filter_shape
+                \\        &param_lib.cmsis_{s}_bias, // bias
+                \\        &param_lib.cmsis_{s}_multiplier, // multipliers
+                \\        &param_lib.cmsis_{s}_shift, // shifts
                 \\        {s}, // stride
                 \\        {s}, // pads
                 \\        {s}, // dilations
@@ -300,9 +307,9 @@ pub const QLinearConv = struct {
                 x_zero_point_name, // x_zero_point
                 out_sani, // output
                 y_zero_point_name, // y_zero_point
-                w_sani, // filter_data
-                w_sani, // filter_shape
-                bias_symbol, // bias
+                out_sani, // filter_data
+                out_sani, // filter_shape
+                out_sani, // bias
                 out_sani, // multipliers
                 out_sani, // shifts
                 stride_string, // stride
@@ -311,12 +318,51 @@ pub const QLinearConv = struct {
                 self.group, // group
                 self.auto_pad, // auto_pad
                 utils.getMathErrorReturn(), // Error code for math errors
-            });
-        } else {
-            // Use compile-time dispatch function that chooses implementation based on CMSIS flags
-            const qlinearconv_impl = "qlinear_conv_dispatch";
-            try writer.print(
-                \\    tensMath.{s}(
+            }),
+            .depthwise => {
+                const in_channels = self.input_x.shape[1];
+                const ch_mult = self.input_w.shape[0] / in_channels;
+                try writer.print(
+                    \\    tensMath.qlinear_conv_dispatch_cmsis_depthwise_prepared(
+                    \\        {s}, // InputType
+                    \\        {s}, // input x
+                    \\        @constCast(&param_lib.tensor_{s}), // x_zero_point
+                    \\        &tensor_{s}, // output
+                    \\        @constCast(&param_lib.tensor_{s}), // y_zero_point
+                    \\        &param_lib.cmsis_{s}_filter, // filter_data
+                    \\        param_lib.cmsis_{s}_filter_shape, // filter_shape
+                    \\        &param_lib.cmsis_{s}_bias, // bias
+                    \\        &param_lib.cmsis_{s}_multiplier, // multipliers
+                    \\        &param_lib.cmsis_{s}_shift, // shifts
+                    \\        {d}, // ch_mult
+                    \\        {s}, // stride
+                    \\        {s}, // pads
+                    \\        {s}, // dilations
+                    \\        {d}, // group
+                    \\        "{s}", // auto_pad
+                    \\    ) catch return {d};
+                , .{
+                    target_type,
+                    tensor_x_string,
+                    x_zero_point_name,
+                    out_sani,
+                    y_zero_point_name,
+                    out_sani,
+                    out_sani,
+                    out_sani,
+                    out_sani,
+                    out_sani,
+                    ch_mult,
+                    stride_string,
+                    pads_string,
+                    dilat_string,
+                    self.group,
+                    self.auto_pad,
+                    utils.getMathErrorReturn(),
+                });
+            },
+            .none => try writer.print(
+                \\    tensMath.qlinear_conv_dispatch(
                 \\        {s}, // InputType
                 \\        {s}, // WeightType
                 \\        {s}, // ScaleType
@@ -339,7 +385,6 @@ pub const QLinearConv = struct {
                 \\        "{s}", // auto_pad
                 \\    ) catch return {d};
             , .{
-                qlinearconv_impl,
                 target_type, // InputType
                 self.input_w.ty.toString(), // WeightType (use actual weight type)
                 "f32", // ScaleType (scales are always f32)
@@ -361,7 +406,7 @@ pub const QLinearConv = struct {
                 self.group, // group
                 self.auto_pad, // auto_pad
                 utils.getMathErrorReturn(), // Error code for math errors
-            });
+            }),
         }
     }
 
